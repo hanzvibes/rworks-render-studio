@@ -57,10 +57,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Calculate dependency cache key
+        id: deps
+        run: |
+          cd "$PROJECT_DIR"
+          if [ -f package-lock.json ]; then
+            echo "hash=$(sha256sum package-lock.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "hash=$(sha256sum package.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore npm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ steps.deps.outputs.hash }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
       - name: Install dependencies
         run: |
           cd "$PROJECT_DIR"
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if [ -f package-lock.json ]; then npm ci --prefer-offline; else npm install --prefer-offline; fi
       - name: Ensure Remotion browser
         run: |
           cd "$PROJECT_DIR"
@@ -74,7 +90,7 @@ jobs:
         run: |
           cd "$PROJECT_DIR"
           mkdir -p "$GITHUB_WORKSPACE/out"
-          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" --codec "$CODEC" --crf "$CRF"
+          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" --codec "$CODEC" --crf "$CRF" --x264-preset veryfast
       - uses: actions/upload-artifact@v4
         with:
           name: remotion-render
