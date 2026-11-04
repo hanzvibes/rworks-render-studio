@@ -159,7 +159,7 @@ jobs:
           OUTPUT_NAME: ${{ inputs.output_name }}
         run: |
           set -euo pipefail
-          if [[ ! "$OUTPUT_NAME" =~ ^[A-Za-z0-9._-]{1,64}\\.(mp4|webm)$ ]]; then
+          if [[ ! "$OUTPUT_NAME" =~ ^[A-Za-z0-9._-]{1,64}\.(mp4|webm)$ then
             echo "::error::Output filename is invalid."
             exit 1
           fi
