@@ -113,7 +113,7 @@ export default function Home() {
     if (!accessKey.trim() || queueDispatchRef.current) return;
     const snapshot = jobsRef.current;
     const hasCloudJob = snapshot.some(job => job.dispatched && !TERMINAL.includes(job.status));
-    const next = snapshot.find(job => job.status === 'local_queued' && job.sourceZipUrl);
+    const next = snapshot.filter(job => job.status === 'local_queued' && job.sourceZipUrl).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))[0];
     if (hasCloudJob || !next) return;
     queueDispatchRef.current = true;
     void dispatchRender(next.sourceZipUrl!, next.requestId, next.compositionId, next.codec || codec, next.crf || quality, next.outputName || 'render')
