@@ -10,6 +10,7 @@ A private Blob store named `rworks-render-source` has been created in Singapore 
 
 ## 3. Configure server environment variables
 Add these to the Vercel Preview environment:
+- `RENDER_STUDIO_API_KEY`: create a long random access key; enter the same value in the dashboard before rendering.
 - `GITHUB_TOKEN`: GitHub fine-grained token for this repository with Actions: Read and write, Contents: Read.
 - `GITHUB_OWNER=hanzvibes`
 - `GITHUB_REPO=rworks-render-studio`
