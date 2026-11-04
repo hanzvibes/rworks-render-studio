@@ -35,7 +35,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: rworks-remotion-render-queue
+  group: rworks-remotion-render-${{ inputs.request_id }}
   cancel-in-progress: false
 jobs:
   render:
@@ -159,6 +159,10 @@ jobs:
           OUTPUT_NAME: ${{ inputs.output_name }}
         run: |
           set -euo pipefail
+          if [[ ! "$OUTPUT_NAME" =~ ^[A-Za-z0-9._-]{1,64}\.(mp4|webm)$ ]]; then
+            echo "::error::Output filename is invalid."
+            exit 1
+          fi
           cd "$PROJECT_DIR"
           mkdir -p "$GITHUB_WORKSPACE/out"
           RENDER_ARGS=(--codec "$CODEC" --crf "$CRF")

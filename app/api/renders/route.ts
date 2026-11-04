@@ -52,6 +52,7 @@ export async function GET(request: Request) {
       || (effectiveStatus === 'completed' ? 'Render finished' : 'Waiting for runner');
 
     let artifactUrl: string | null = null;
+    let artifactSizeBytes: number | null = null;
     if (effectiveStatus === 'completed' && effectiveConclusion === 'success') {
       const artifactsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${run.id}/artifacts`, {
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
@@ -59,8 +60,10 @@ export async function GET(request: Request) {
       });
       if (artifactsResponse.ok) {
         const artifacts = await artifactsResponse.json();
-        if (artifacts.artifacts?.some((artifact: { name: string; expired: boolean }) => artifact.name === 'remotion-render' && !artifact.expired)) {
+        const renderArtifact = artifacts.artifacts?.find((artifact: { name: string; expired: boolean; size_in_bytes?: number }) => artifact.name === 'remotion-render' && !artifact.expired);
+        if (renderArtifact) {
           artifactUrl = `/api/renders/${run.id}/file`;
+          artifactSizeBytes = typeof renderArtifact.size_in_bytes === 'number' ? renderArtifact.size_in_bytes : null;
         }
       }
     }
@@ -75,6 +78,7 @@ export async function GET(request: Request) {
       createdAt: run.created_at,
       updatedAt: run.updated_at,
       artifactUrl,
+      artifactSizeBytes,
       steps,
       progress,
       currentStep,
