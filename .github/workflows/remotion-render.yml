@@ -50,7 +50,33 @@ jobs:
           set -euo pipefail
           mkdir -p source out
           curl --fail --location --silent --show-error -H "Authorization: Bearer $BLOB_READ_WRITE_TOKEN" "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
-          unzip -q /tmp/remotion-source.zip -d source
+          python3 - <<'PY'
+          import stat
+          import zipfile
+
+          archive = "/tmp/remotion-source.zip"
+          max_uncompressed = 2 * 1024 * 1024 * 1024
+          max_files = 10000
+          with zipfile.ZipFile(archive) as bundle:
+              entries = bundle.infolist()
+              if len(entries) > max_files:
+                  raise SystemExit("ZIP contains too many files (limit: 10,000).")
+              total_size = 0
+              for entry in entries:
+                  name = entry.filename.replace("\\\\", "/")
+                  parts = name.split("/")
+                  if name.startswith("/") or any(part == ".." for part in parts):
+                      raise SystemExit("ZIP contains an unsafe file path.")
+                  if stat.S_ISLNK(entry.external_attr >> 16):
+                      raise SystemExit("ZIP symlinks are not supported.")
+                  total_size += entry.file_size
+                  if total_size > max_uncompressed:
+                      raise SystemExit("ZIP expands beyond the 2 GB safety limit.")
+              bad_file = bundle.testzip()
+              if bad_file:
+                  raise SystemExit(f"ZIP integrity check failed: {bad_file}")
+              bundle.extractall("source")
+          PY
           ROOT="$(find source -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then echo 'No package.json found in uploaded ZIP'; exit 1; fi
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
@@ -90,7 +116,11 @@ jobs:
         run: |
           cd "$PROJECT_DIR"
           mkdir -p "$GITHUB_WORKSPACE/out"
-          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" --codec "$CODEC" --crf "$CRF" --x264-preset veryfast
+          RENDER_ARGS=(--codec "$CODEC" --crf "$CRF")
+          if [ "$CODEC" = "h264" ]; then
+            RENDER_ARGS+=(--x264-preset veryfast)
+          fi
+          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" "${RENDER_ARGS[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: remotion-render
