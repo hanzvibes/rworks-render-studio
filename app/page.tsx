@@ -122,7 +122,7 @@ export default function Home() {
       .finally(() => { queueDispatchRef.current = false; });
   }, [jobs, accessKey, codec, quality]);
 
-  const activeCount = jobs.filter(job => !TERMINAL.includes(job.status)).length;
+  const activeCount = jobs.filter(job => job.dispatched && !TERMINAL.includes(job.status)).length;
   const selectedJob = jobs.find(job => job.requestId === activeJobId) || jobs[0] || null;
   const failedJobs = jobs.filter(job => (job.status === 'completed' && job.conclusion !== 'success') || job.status === 'failed').length;
   const presetInfo = PRESETS[preset];
