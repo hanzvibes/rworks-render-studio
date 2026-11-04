@@ -27,6 +27,22 @@ export async function GET(request: Request) {
     const run = data.workflow_runs?.find((item: { display_title?: string }) => item.display_title?.includes(requestId));
     if (!run) return NextResponse.json({ requestId, status: 'queued', message: 'Waiting for GitHub Actions to register the run.' });
 
+    const jobsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${run.id}/jobs?per_page=20`, {
+      headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
+      cache: 'no-store',
+    });
+    const jobsData = jobsResponse.ok ? await jobsResponse.json() : { jobs: [] };
+    const steps = (jobsData.jobs?.[0]?.steps || []).map((step: { name: string; status: string; conclusion: string | null }) => ({
+      name: step.name,
+      status: step.status,
+      conclusion: step.conclusion,
+    }));
+    const completedSteps = steps.filter((step: { status: string }) => step.status === 'completed').length;
+    const progress = steps.length ? Math.round((completedSteps / steps.length) * 100) : run.status === 'completed' ? 100 : 0;
+    const currentStep = steps.find((step: { status: string }) => step.status === 'in_progress')?.name
+      || steps.find((step: { status: string; conclusion: string | null }) => step.status === 'completed' && step.conclusion === 'failure')?.name
+      || (run.status === 'completed' ? 'Render finished' : 'Waiting for runner');
+
     let artifactUrl: string | null = null;
     if (run.status === 'completed' && run.conclusion === 'success') {
       const artifactsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${run.id}/artifacts`, {
@@ -51,6 +67,9 @@ export async function GET(request: Request) {
       createdAt: run.created_at,
       updatedAt: run.updated_at,
       artifactUrl,
+      steps,
+      progress,
+      currentStep,
     });
   } catch {
     return NextResponse.json({ error: 'Unable to contact GitHub Actions.' }, { status: 502 });
