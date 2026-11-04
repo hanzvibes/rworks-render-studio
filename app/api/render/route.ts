@@ -6,6 +6,10 @@ const allowedCodecs = new Set(['h264', 'h265', 'vp8']);
 const allowedCrf = new Set(['15', '18', '23', '28']);
 
 export async function POST(request: Request) {
+  const expectedKey = process.env.RENDER_STUDIO_API_KEY;
+  if (!expectedKey) return NextResponse.json({ error: 'Render Studio access key is not configured.' }, { status: 503 });
+  if (request.headers.get('x-render-studio-key') !== expectedKey) return NextResponse.json({ error: 'Invalid Render Studio access key.' }, { status: 401 });
+
   const token = process.env.GITHUB_TOKEN;
   const owner = process.env.GITHUB_OWNER;
   const repo = process.env.GITHUB_REPO;
