@@ -63,7 +63,7 @@ jobs:
                   raise SystemExit("ZIP contains too many files (limit: 10,000).")
               total_size = 0
               for entry in entries:
-                  name = entry.filename.replace("\\\\", "/")
+                  name = entry.filename.replace("\\", "/")
                   parts = name.split("/")
                   if name.startswith("/") or any(part == ".." for part in parts):
                       raise SystemExit("ZIP contains an unsafe file path.")
