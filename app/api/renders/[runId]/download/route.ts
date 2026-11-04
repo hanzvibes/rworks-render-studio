@@ -21,8 +21,16 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
   const artifact = data.artifacts?.find((item: { name: string; expired: boolean }) => item.name === 'remotion-render' && !item.expired);
   if (!artifact) return NextResponse.json({ error: 'Render artifact is not available or has expired.' }, { status: 404 });
 
-  const download = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip`, { headers, redirect: 'manual', cache: 'no-store' });
-  const location = download.headers.get('location');
-  if (download.status !== 302 || !location) return NextResponse.json({ error: 'GitHub did not provide an artifact download.' }, { status: 502 });
-  return NextResponse.redirect(location);
+  const archive = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip`, { headers, redirect: 'manual', cache: 'no-store' });
+  const location = archive.headers.get('location');
+  if (archive.status !== 302 || !location) return NextResponse.json({ error: 'GitHub did not provide an artifact download.' }, { status: 502 });
+  const file = await fetch(location, { cache: 'no-store' });
+  if (!file.ok || !file.body) return NextResponse.json({ error: 'Could not download render artifact.' }, { status: 502 });
+  return new Response(file.body, {
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="remotion-render-${runId}.zip"`,
+      'Cache-Control': 'private, no-store',
+    },
+  });
 }
