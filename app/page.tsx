@@ -13,6 +13,9 @@ type RenderJob = {
   runId?: number;
   htmlUrl?: string;
   artifactUrl?: string | null;
+  progress?: number;
+  currentStep?: string;
+  steps?: { name: string; status: string; conclusion: string | null }[];
 };
 
 const STORAGE_KEY = 'rworks-render-jobs-v1';
@@ -28,6 +31,7 @@ export default function Home() {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const jobsRef = useRef<RenderJob[]>([]);
   jobsRef.current = jobs;
 
@@ -169,12 +173,40 @@ export default function Home() {
 
         <aside style={{ display: 'grid', gap: 18, alignContent: 'start' }}>
           <div className="panel" style={{ padding: 22 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 18 }}><Gauge size={17} /><b>Render pipeline</b></div>
-            {['Upload source', 'Dispatch workflow', 'Render composition', 'Download artifact'].map((label, i) => (
-              <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '12px 0', borderTop: '1px solid #252831' }}>
-                <span className="muted" style={{ fontSize: 12 }}>0{i + 1}</span><span style={{ fontSize: 13 }}>{label}</span><span className="muted" style={{ marginLeft: 'auto' }}>{i === 0 ? <FolderUp size={15} /> : i === 1 ? <Play size={15} /> : i === 2 ? <Film size={15} /> : <CircleCheck size={15} />}</span>
-              </div>
-            ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 8 }}><Gauge size={17} /><b>Live render timeline</b></div>
+            {jobs[0] ? (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '12px 0 8px' }}>
+                  <span className="muted" style={{ fontSize: 12 }}>{jobs[0].currentStep || 'Waiting for runner'}</span>
+                  <b className="accent" style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{jobs[0].progress ?? 0}%</b>
+                </div>
+                <div className="progress-track"><div className="progress-fill" style={{ width: \`\${jobs[0].progress ?? 0}%\` }} /></div>
+                <div style={{ marginTop: 18 }}>
+                  {(jobs[0].steps?.length ? jobs[0].steps : [{ name: 'Waiting for GitHub Actions', status: 'queued', conclusion: null }]).map((step, index) => {
+                    const done = step.status === 'completed' && step.conclusion === 'success';
+                    const failedStep = step.status === 'completed' && step.conclusion === 'failure';
+                    const running = step.status === 'in_progress';
+                    const expanded = expandedStep === step.name;
+                    return <div key={step.name} className="timeline-item">
+                      <button className="timeline-step" onClick={() => setExpandedStep(expanded ? null : step.name)} aria-expanded={expanded}>
+                        <span className={\`timeline-node \${done ? 'done' : failedStep ? 'failed' : running ? 'running' : ''}\`}>
+                          {done ? <CircleCheck size={15} /> : failedStep ? <CircleX size={15} /> : running ? <LoaderCircle size={15} className="spin" /> : <span>{String(index + 1).padStart(2, '0')}</span>}
+                        </span>
+                        <span style={{ flex: 1, textAlign: 'left' }}>
+                          <b style={{ display: 'block', fontSize: 12, fontWeight: 600 }}>{step.name}</b>
+                          <small className="muted">{done ? 'Completed' : failedStep ? 'Failed' : running ? 'In progress' : step.status === 'queued' ? 'Waiting' : step.status}</small>
+                        </span>
+                        <span className="muted" style={{ fontSize: 16 }}>{expanded ? '−' : '+'}</span>
+                      </button>
+                      {expanded && <div className="timeline-detail">{done ? 'This workflow step completed successfully.' : failedStep ? 'This step failed. Open the workflow logs to inspect the error output.' : running ? 'GitHub Actions is currently executing this step. Status refreshes automatically.' : 'This step has not started yet.'}</div>}
+                    </div>;
+                  })}
+                </div>
+                <p className="muted" style={{ fontSize: 11, margin: '12px 0 0' }}>Status refreshes every 5 seconds from GitHub Actions.</p>
+              </>
+            ) : (
+              <div className="empty-timeline"><LoaderCircle size={22} className="muted" /><p className="muted" style={{ fontSize: 12 }}>Start a render to see its live timeline here.</p></div>
+            )}
           </div>
           <div className="panel" style={{ padding: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 12 }}><Clock3 size={17} /><b>Recent renders</b><span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{activeCount ? `${activeCount} active` : `${jobs.length} total`}</span></div>
@@ -190,7 +222,7 @@ export default function Home() {
                   <b style={{ fontSize: 13 }}>{job.compositionId}</b><span className="muted" style={{ marginLeft: 'auto', fontSize: 11 }}>{label}</span>
                 </div>
                 <p className="muted" style={{ fontSize: 11, margin: '7px 0' }}>{new Date(job.createdAt).toLocaleString()}</p>
-                <div style={{ height: 4, borderRadius: 10, background: '#292d35', overflow: 'hidden', marginBottom: 9 }}><div style={{ height: '100%', width: completed ? '100%' : failed ? '100%' : job.status === 'in_progress' ? '65%' : '12%', background: failed ? '#ff7777' : '#c4f56b', transition: 'width .3s' }} /></div>
+                <div className="progress-track" style={{ marginBottom: 9 }}><div className="progress-fill" style={{ width: `${job.progress ?? (completed || failed ? 100 : 8)}%`, background: failed ? '#ff7777' : undefined }} /></div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
                   {job.artifactUrl && job.runId && <button onClick={() => void downloadArtifact(job.runId!)} disabled={downloading === job.runId} style={smallButton}>{downloading === job.runId ? 'Preparing…' : <><Download size={13} /> Download artifact (.zip)</>}</button>}
                   {job.htmlUrl && <a href={job.htmlUrl} target="_blank" rel="noreferrer" style={smallLink}>View logs <ExternalLink size={12} /></a>}
@@ -204,6 +236,24 @@ export default function Home() {
         </aside>
       </div>
 
+      <style jsx global>{\`
+        .spin { animation: rspin 1.1s linear infinite; }
+        @keyframes rspin { to { transform: rotate(360deg); } }
+        .progress-track { height: 6px; border-radius: 99px; background: #292d35; overflow: hidden; }
+        .progress-fill { height: 100%; border-radius: inherit; background: #c4f56b; transition: width .45s ease; }
+        .timeline-item { position: relative; padding-bottom: 7px; }
+        .timeline-item:not(:last-child):before { content: ''; position: absolute; left: 15px; top: 34px; bottom: -1px; width: 1px; background: #343a44; }
+        .timeline-step { position: relative; z-index: 1; width: 100%; display: flex; align-items: center; gap: 11px; border: 0; padding: 8px 2px; color: #f2f3f5; background: transparent; cursor: pointer; text-align: left; }
+        .timeline-node { width: 30px; height: 30px; flex: 0 0 30px; display: grid; place-items: center; border-radius: 50%; background: #222731; color: #9aa2ae; font-size: 10px; }
+        .timeline-node.done { color: #c4f56b; background: #29351c; }
+        .timeline-node.failed { color: #ff8585; background: #3b2225; }
+        .timeline-node.running { color: #c4f56b; background: #29351c; box-shadow: 0 0 0 4px #c4f56b18; }
+        .timeline-detail { margin: 0 0 10px 43px; padding: 9px 11px; border-left: 2px solid #c4f56b; border-radius: 0 8px 8px 0; background: #1b2027; color: #aeb5c0; font-size: 11px; line-height: 1.6; animation: reveal .2s ease-out; }
+        @keyframes reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+        .empty-timeline { text-align: center; padding: 28px 8px 12px; }
+        @media (prefers-reduced-motion: reduce) { .spin, .timeline-detail { animation: none !important; transition: none !important; } }
+        @media (max-width: 760px) { main > div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; } }
+      \`}</style>
       <footer className="muted" style={{ marginTop: 38, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}><span>R/WORKS RENDER STUDIO · MVP</span><span>Built for creators who ship.</span></footer>
     </main>
   );
