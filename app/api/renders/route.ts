@@ -17,8 +17,9 @@ export async function GET(request: Request) {
   if (!requestId || !/^[a-zA-Z0-9-]{8,80}$/.test(requestId)) return NextResponse.json({ error: 'Invalid render request ID.' }, { status: 400 });
 
   try {
-    const branch = process.env.VERCEL_GIT_COMMIT_REF || 'main';
-    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&event=workflow_dispatch&per_page=30`, {
+    // Search by the unique request ID across branches. Preview deployments may dispatch
+    // workflows from a different ref than the production deployment.
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=100`, {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
       cache: 'no-store',
     });
