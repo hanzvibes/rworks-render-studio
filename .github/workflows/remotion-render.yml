@@ -1,10 +1,14 @@
 name: Remotion Cloud Render
-run-name: Render ${{ inputs.composition_id }}
+run-name: Render ${{ inputs.composition_id }} [${{ inputs.request_id }}]
 on:
   workflow_dispatch:
     inputs:
+      request_id:
+        description: Unique dashboard request ID
+        required: true
+        type: string
       source_zip_url:
-        description: Public URL to the Remotion project ZIP
+        description: Private Vercel Blob URL to the Remotion project ZIP
         required: true
         type: string
       composition_id:
@@ -46,17 +50,59 @@ jobs:
           set -euo pipefail
           mkdir -p source out
           curl --fail --location --silent --show-error -H "Authorization: Bearer $BLOB_READ_WRITE_TOKEN" "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
-          unzip -q /tmp/remotion-source.zip -d source
+          python3 - <<'PY'
+          import stat
+          import zipfile
+
+          archive = "/tmp/remotion-source.zip"
+          max_uncompressed = 2 * 1024 * 1024 * 1024
+          max_files = 10000
+          with zipfile.ZipFile(archive) as bundle:
+              entries = bundle.infolist()
+              if len(entries) > max_files:
+                  raise SystemExit("ZIP contains too many files (limit: 10,000).")
+              total_size = 0
+              for entry in entries:
+                  name = entry.filename.replace("\\", "/")
+                  parts = name.split("/")
+                  if name.startswith("/") or any(part == ".." for part in parts):
+                      raise SystemExit("ZIP contains an unsafe file path.")
+                  if stat.S_ISLNK(entry.external_attr >> 16):
+                      raise SystemExit("ZIP symlinks are not supported.")
+                  total_size += entry.file_size
+                  if total_size > max_uncompressed:
+                      raise SystemExit("ZIP expands beyond the 2 GB safety limit.")
+              bad_file = bundle.testzip()
+              if bad_file:
+                  raise SystemExit(f"ZIP integrity check failed: {bad_file}")
+              bundle.extractall("source")
+          PY
           ROOT="$(find source -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then echo 'No package.json found in uploaded ZIP'; exit 1; fi
           echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Calculate dependency cache key
+        id: deps
+        run: |
+          cd "$PROJECT_DIR"
+          if [ -f package-lock.json ]; then
+            echo "hash=$(sha256sum package-lock.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          else
+            echo "hash=$(sha256sum package.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore npm cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ steps.deps.outputs.hash }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
       - name: Install dependencies
         run: |
           cd "$PROJECT_DIR"
-          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+          if [ -f package-lock.json ]; then npm ci --prefer-offline; else npm install --prefer-offline; fi
       - name: Ensure Remotion browser
         run: |
           cd "$PROJECT_DIR"
@@ -70,7 +116,11 @@ jobs:
         run: |
           cd "$PROJECT_DIR"
           mkdir -p "$GITHUB_WORKSPACE/out"
-          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" --codec "$CODEC" --crf "$CRF"
+          RENDER_ARGS=(--codec "$CODEC" --crf "$CRF")
+          if [ "$CODEC" = "h264" ]; then
+            RENDER_ARGS+=(--x264-preset veryfast)
+          fi
+          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" "${RENDER_ARGS[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: remotion-render
