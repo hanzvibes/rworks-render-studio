@@ -293,16 +293,22 @@ export default function Home() {
   async function downloadArtifact(runId: number) {
     setDownloading(runId);
     try {
-      const { blob, filename } = await fetchRenderedVideo(runId);
-      const url = URL.createObjectURL(blob);
+      const response = await fetch(`/api/renders/${runId}/file?mode=archive`, {
+        headers: { 'x-render-studio-key': accessKey.trim() },
+        cache: 'no-store',
+      });
+      const result = await response.json();
+      if (!response.ok || !result.downloadUrl) throw new Error(result.error || 'Download artifact gagal disiapkan.');
+      // The signed GitHub URL is short-lived. Navigate directly so large files bypass
+      // the Vercel Function response-size limit.
       const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = filename;
+      anchor.href = result.downloadUrl;
+      anchor.target = '_blank';
+      anchor.rel = 'noreferrer';
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('Video berhasil disiapkan untuk diunduh.', 'success');
+      setNotice('Paket render sedang diunduh. Ekstrak ZIP untuk mengambil file MP4/WebM.', 'success');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Download video gagal.', 'error');
     } finally { setDownloading(null); }
@@ -441,7 +447,7 @@ export default function Home() {
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
               {running&&selectedJob.runId&&<div className="success-helper"><AlertCircle size={15}/><div><b>Render sedang berjalan</b><small>Batalkan untuk menghentikan antrean atau proses render.</small></div><button type="button" onClick={()=>void cancelRender(selectedJob)} disabled={cancelling===selectedJob.runId}>{cancelling===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<X size={14}/>} Cancel render</button></div>}
               {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>Open workflow logs to see the exact error. If the source ZIP is still available in this session, you can retry.</p></div>{sourceUrls[selectedJob.requestId]&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
-              {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
+              {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video (.zip)</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
             </div> : <div className="empty-state"><span><Film size={23}/></span><b>Your next render starts here</b><p>Upload a Remotion project to see live progress, workflow steps and finished outputs.</p></div>}
           </section>
 
