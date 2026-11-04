@@ -15,7 +15,7 @@ type RenderJob = {
   requestId: string; compositionId: string; createdAt: string; status: string;
   conclusion?: string | null; runId?: number; htmlUrl?: string; artifactUrl?: string | null;
   progress?: number; currentStep?: string; steps?: Step[];
-  dispatched?: boolean; sourceZipUrl?: string; codec?: string; crf?: string; outputName?: string;
+  dispatched?: boolean; dispatchedAt?: string; sourceZipUrl?: string; codec?: string; crf?: string; outputName?: string;
   sourceSizeBytes?: number; error?: string; updatedAt?: string;
 };
 type Preset = 'draft' | 'standard' | 'final';
@@ -117,7 +117,7 @@ export default function Home() {
     if (hasCloudJob || !next) return;
     queueDispatchRef.current = true;
     void dispatchRender(next.sourceZipUrl!, next.requestId, next.compositionId, next.codec || codec, next.crf || quality, next.outputName || 'render')
-      .then(() => setJobs(current => current.map(job => job.requestId === next.requestId ? { ...job, status: 'queued', dispatched: true } : job)))
+      .then(() => setJobs(current => current.map(job => job.requestId === next.requestId ? { ...job, status: 'queued', dispatched: true, dispatchedAt: new Date().toISOString() } : job)))
       .catch(error => setJobs(current => current.map(job => job.requestId === next.requestId ? { ...job, status: 'failed', error: error instanceof Error ? error.message : 'Dispatch failed.' } : job)))
       .finally(() => { queueDispatchRef.current = false; });
   }, [jobs, accessKey, codec, quality]);
@@ -349,10 +349,10 @@ export default function Home() {
   const failed = Boolean(selectedJob && ((selectedJob.status === 'completed' && selectedJob.conclusion !== 'success') || selectedJob.status === 'failed'));
   const running = Boolean(selectedJob && selectedJob.dispatched && !TERMINAL.includes(selectedJob.status));
   const queuedCount = jobs.filter(job => job.status === 'local_queued').length;
-  const completedJobs = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success' && job.updatedAt && job.sourceSizeBytes);
-  const averageSecondsPerMb = completedJobs.length ? completedJobs.reduce((total, job) => total + ((new Date(job.updatedAt!).getTime() - new Date(job.createdAt).getTime()) / 1000 / Math.max(1, (job.sourceSizeBytes || 1) / 1024 / 1024)), 0) / completedJobs.length : null;
+  const completedJobs = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success' && job.updatedAt && job.dispatchedAt && job.sourceSizeBytes);
+  const averageSecondsPerMb = completedJobs.length ? completedJobs.reduce((total, job) => total + ((new Date(job.updatedAt!).getTime() - new Date(job.dispatchedAt || job.createdAt).getTime()) / 1000 / Math.max(1, (job.sourceSizeBytes || 1) / 1024 / 1024)), 0) / completedJobs.length : null;
   const estimatedMinutes = file && averageSecondsPerMb ? Math.max(1, Math.ceil((averageSecondsPerMb * file.size / 1024 / 1024) / 60)) : null;
-  const averageRenderMinutes = completedJobs.length ? Math.round(completedJobs.reduce((total, job) => total + (new Date(job.updatedAt!).getTime() - new Date(job.createdAt).getTime()) / 60000, 0) / completedJobs.length) : null;
+  const averageRenderMinutes = completedJobs.length ? Math.round(completedJobs.reduce((total, job) => total + (new Date(job.updatedAt!).getTime() - new Date(job.dispatchedAt || job.createdAt).getTime()) / 60000, 0) / completedJobs.length) : null;
   const errorHint = selectedJob?.error || (selectedJob?.currentStep?.toLowerCase().includes('install') ? 'Dependency gagal dipasang. Periksa lockfile dan versi Node/npm project.' : selectedJob?.currentStep?.toLowerCase().includes('render') ? 'Proses render gagal. Cek asset, composition ID, dan pesan workflow.' : 'Buka workflow logs untuk melihat error asli. Pastikan entry point, dependency, dan asset project tersedia.');
 
   return (
