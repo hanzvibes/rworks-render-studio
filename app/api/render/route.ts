@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   if (!token || !owner || !repo) return NextResponse.json({ error: 'GitHub Actions credentials are not configured on the server.' }, { status: 503 });
 
   try {
-    const body = await request.json() as { sourceZipUrl?: string; compositionId?: string; codec?: string; crf?: string; requestId?: string };
+    const body = await request.json() as { sourceZipUrl?: string; compositionId?: string; codec?: string; crf?: string; requestId?: string; outputName?: string };
     const sourceUrl = new URL(body.sourceZipUrl || '');
     if (sourceUrl.protocol !== 'https:' || !sourceUrl.hostname.endsWith('.blob.vercel-storage.com')) {
       return NextResponse.json({ error: 'Invalid private Blob source URL.' }, { status: 400 });
@@ -28,6 +28,9 @@ export async function POST(request: Request) {
     const codec = body.codec || 'h264';
     const crf = body.crf || '18';
     if (!allowedCodecs.has(codec) || !allowedCrf.has(crf)) return NextResponse.json({ error: 'Invalid render settings.' }, { status: 400 });
+    const requestedName = (body.outputName || 'render').replace(/\\.(mp4|webm)$/i, '');
+    const safeName = requestedName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60) || 'render';
+    const outputName = safeName + (codec === 'vp8' ? '.webm' : '.mp4');
 
     const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`, {
       method: 'POST',
@@ -38,7 +41,7 @@ export async function POST(request: Request) {
         composition_id: body.compositionId.trim(),
         codec,
         crf,
-        output_name: codec === 'vp8' ? 'render.webm' : 'render.mp4',
+        output_name: outputName,
       } }),
       cache: 'no-store',
     });
