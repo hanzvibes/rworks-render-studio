@@ -512,9 +512,10 @@ export default function Home() {
             {jobs.length===0 ? <div className="history-empty">No render history yet.</div> : <div className="job-list">{jobs.map(job=>{
               const isDone=job.status==='completed'&&job.conclusion==='success';
               const isFailed=(job.status==='completed'&&job.conclusion!=='success')||job.status==='failed';
+              const isCancelled=job.status==='cancelled';
               const isSelected=selectedJob?.requestId===job.requestId;
               return <button type="button" className={`job-row ${isSelected?'selected':''}`} key={job.requestId} onClick={()=>setActiveJobId(job.requestId)}>
-                <span className={`job-icon ${isDone?'done':isFailed?'failed':'pending'}`}>{isDone?<Check size={15}/>:isFailed?<AlertCircle size={15}/>:<LoaderCircle size={15} className="spin"/>}</span>
+                <span className={`job-icon ${isDone?'done':isFailed?'failed':isCancelled?'cancelled':'pending'}`}>{isDone?<Check size={15}/>:isFailed?<AlertCircle size={15}/>:isCancelled?<X size={15}/>:<LoaderCircle size={15} className="spin"/>}</span>
                 <span className="job-info"><b>{job.compositionId}</b><small>{new Date(job.createdAt).toLocaleString()}</small></span>
                 <span className="job-status">{isDone?'Ready':isFailed?'Failed':job.status==='local_queued'?'In queue':job.status==='cancelled'?'Cancelled':job.status==='queued'?'Queued':'Running'}</span>
               </button>;
