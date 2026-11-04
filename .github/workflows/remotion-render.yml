@@ -41,10 +41,11 @@ jobs:
       - name: Download source archive
         env:
           SOURCE_ZIP_URL: ${{ inputs.source_zip_url }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p source out
-          curl --fail --location --silent --show-error "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
+          curl --fail --location --silent --show-error -H "Authorization: Bearer $BLOB_READ_WRITE_TOKEN" "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
           unzip -q /tmp/remotion-source.zip -d source
           ROOT="$(find source -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
           if [ -z "$ROOT" ]; then echo 'No package.json found in uploaded ZIP'; exit 1; fi
