@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
-import { Film, FolderUp, Gauge, Play, Clock3, Settings2, CircleCheck, LoaderCircle, CircleX, Download, ExternalLink, RefreshCw } from 'lucide-react';
+import { Film, FolderUp, Gauge, Play, Clock3, Settings2, CircleCheck, LoaderCircle, CircleX, Download, ExternalLink } from 'lucide-react';
 
 type RenderJob = {
   requestId: string;
