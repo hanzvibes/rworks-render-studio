@@ -180,7 +180,7 @@ export default function Home() {
                   <span className="muted" style={{ fontSize: 12 }}>{jobs[0].currentStep || 'Waiting for runner'}</span>
                   <b className="accent" style={{ fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{jobs[0].progress ?? 0}%</b>
                 </div>
-                <div className="progress-track"><div className="progress-fill" style={{ width: \`\${jobs[0].progress ?? 0}%\` }} /></div>
+                <div className="progress-track"><div className="progress-fill" style={{ width: `${jobs[0].progress ?? 0}%` }} /></div>
                 <div style={{ marginTop: 18 }}>
                   {(jobs[0].steps?.length ? jobs[0].steps : [{ name: 'Waiting for GitHub Actions', status: 'queued', conclusion: null }]).map((step, index) => {
                     const done = step.status === 'completed' && step.conclusion === 'success';
@@ -189,7 +189,7 @@ export default function Home() {
                     const expanded = expandedStep === step.name;
                     return <div key={step.name} className="timeline-item">
                       <button className="timeline-step" onClick={() => setExpandedStep(expanded ? null : step.name)} aria-expanded={expanded}>
-                        <span className={\`timeline-node \${done ? 'done' : failedStep ? 'failed' : running ? 'running' : ''}\`}>
+                        <span className={`timeline-node ${done ? 'done' : failedStep ? 'failed' : running ? 'running' : ''}`}>
                           {done ? <CircleCheck size={15} /> : failedStep ? <CircleX size={15} /> : running ? <LoaderCircle size={15} className="spin" /> : <span>{String(index + 1).padStart(2, '0')}</span>}
                         </span>
                         <span style={{ flex: 1, textAlign: 'left' }}>
@@ -236,7 +236,7 @@ export default function Home() {
         </aside>
       </div>
 
-      <style jsx global>{\`
+      <style jsx global>{`
         .spin { animation: rspin 1.1s linear infinite; }
         @keyframes rspin { to { transform: rotate(360deg); } }
         .progress-track { height: 6px; border-radius: 99px; background: #292d35; overflow: hidden; }
@@ -253,7 +253,7 @@ export default function Home() {
         .empty-timeline { text-align: center; padding: 28px 8px 12px; }
         @media (prefers-reduced-motion: reduce) { .spin, .timeline-detail { animation: none !important; transition: none !important; } }
         @media (max-width: 760px) { main > div[style*="grid-template-columns"] { grid-template-columns: 1fr !important; } }
-      \`}</style>
+      `}</style>
       <footer className="muted" style={{ marginTop: 38, fontSize: 11, display: 'flex', justifyContent: 'space-between' }}><span>R/WORKS RENDER STUDIO · MVP</span><span>Built for creators who ship.</span></footer>
     </main>
   );
