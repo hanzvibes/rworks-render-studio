@@ -37,7 +37,8 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
     const bytes = await video.async('uint8array');
     const filename = video.name.split('/').pop()?.replace(/[^a-zA-Z0-9._-]/g, '-') || `render-${runId}.mp4`;
     const contentType = filename.toLowerCase().endsWith('.webm') ? 'video/webm' : 'video/mp4';
-    return new Response(bytes, {
+    const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    return new Response(body, {
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(bytes.byteLength),
