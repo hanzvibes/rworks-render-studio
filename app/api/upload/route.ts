@@ -14,6 +14,7 @@ export async function POST(request: Request) {
           throw new Error('Only ZIP archives are allowed.');
         }
         return {
+          access: 'private',
           allowedContentTypes: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
           maximumSizeInBytes: 250 * 1024 * 1024,
           addRandomSuffix: true,
