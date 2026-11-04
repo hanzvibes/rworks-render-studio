@@ -7,12 +7,14 @@ import { Film, FolderUp, Gauge, Play, Clock3, Settings2, Clapperboard, CircleChe
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [composition, setComposition] = useState('');
+  const [accessKey, setAccessKey] = useState('');
   const [codec, setCodec] = useState('h264');
   const [quality, setQuality] = useState('18');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('Ready to configure a render');
 
   async function startRender() {
+    if (!accessKey.trim()) return setMessage('Enter your Render Studio access key first.');
     if (!file) return setMessage('Choose a Remotion project ZIP first.');
     if (!file.name.toLowerCase().endsWith('.zip')) return setMessage('Please select a ZIP archive.');
     if (file.size > 250 * 1024 * 1024) return setMessage('ZIP must be 250 MB or smaller.');
@@ -24,12 +26,13 @@ export default function Home() {
       const blob = await upload(file.name, file, {
         access: 'private',
         handleUploadUrl: '/api/upload',
+        clientPayload: accessKey.trim(),
       });
 
       setMessage('Upload complete. Dispatching GitHub Actions…');
       const response = await fetch('/api/render', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-render-studio-key': accessKey.trim() },
         body: JSON.stringify({
           sourceZipUrl: blob.url,
           compositionId: composition.trim(),
@@ -73,6 +76,7 @@ export default function Home() {
             <input type="file" accept=".zip,application/zip" hidden onChange={e => setFile(e.target.files?.[0] ?? null)} />
           </label>
 
+          <div style={{ marginBottom: 14 }}><label className="muted" style={{ fontSize: 12 }}>WORKSPACE ACCESS KEY</label><input type="password" autoComplete="off" value={accessKey} onChange={e => setAccessKey(e.target.value)} placeholder="Enter the key configured in Vercel" style={field} /></div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div><label className="muted" style={{ fontSize: 12 }}>COMPOSITION ID</label><input value={composition} onChange={e => setComposition(e.target.value)} placeholder="MyComposition" style={field} /></div>
             <div><label className="muted" style={{ fontSize: 12 }}>OUTPUT CODEC</label><select value={codec} onChange={e => setCodec(e.target.value)} style={field}><option value="h264">H.264 / MP4</option><option value="h265">H.265</option><option value="vp8">VP8 / WebM</option></select></div>
