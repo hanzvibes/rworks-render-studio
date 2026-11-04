@@ -15,6 +15,8 @@ type RenderJob = {
   requestId: string; compositionId: string; createdAt: string; status: string;
   conclusion?: string | null; runId?: number; htmlUrl?: string; artifactUrl?: string | null;
   progress?: number; currentStep?: string; steps?: Step[];
+  dispatched?: boolean; sourceZipUrl?: string; codec?: string; crf?: string; outputName?: string;
+  sourceSizeBytes?: number; error?: string; updatedAt?: string;
 };
 type Preset = 'draft' | 'standard' | 'final';
 type ProjectInspection = {
@@ -49,6 +51,7 @@ export default function Home() {
   const [preset, setPreset] = useState<Preset>('standard');
   const [codec, setCodec] = useState('h264');
   const [quality, setQuality] = useState('18');
+  const [outputName, setOutputName] = useState('render');
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<'idle' | 'uploading' | 'dispatching'>('idle');
@@ -67,6 +70,7 @@ export default function Home() {
   const [sourceUrls, setSourceUrls] = useState<Record<string, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
   const jobsRef = useRef<RenderJob[]>([]);
+  const queueDispatchRef = useRef(false);
   jobsRef.current = jobs;
 
   useEffect(() => {
@@ -88,7 +92,7 @@ export default function Home() {
     if (!accessKey.trim()) return;
     let cancelled = false;
     const poll = async () => {
-      const active = jobsRef.current.filter(job => !TERMINAL.includes(job.status));
+      const active = jobsRef.current.filter(job => job.dispatched && !TERMINAL.includes(job.status));
       for (const job of active) {
         try {
           const response = await fetch(`/api/renders?requestId=${encodeURIComponent(job.requestId)}`, {
@@ -104,6 +108,19 @@ export default function Home() {
     const timer = window.setInterval(() => void poll(), 6000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [accessKey]);
+
+  useEffect(() => {
+    if (!accessKey.trim() || queueDispatchRef.current) return;
+    const snapshot = jobsRef.current;
+    const hasCloudJob = snapshot.some(job => job.dispatched && !TERMINAL.includes(job.status));
+    const next = snapshot.find(job => job.status === 'local_queued' && job.sourceZipUrl);
+    if (hasCloudJob || !next) return;
+    queueDispatchRef.current = true;
+    void dispatchRender(next.sourceZipUrl!, next.requestId, next.compositionId, next.codec || codec, next.crf || quality, next.outputName || 'render')
+      .then(() => setJobs(current => current.map(job => job.requestId === next.requestId ? { ...job, status: 'queued', dispatched: true } : job)))
+      .catch(error => setJobs(current => current.map(job => job.requestId === next.requestId ? { ...job, status: 'failed', error: error instanceof Error ? error.message : 'Dispatch failed.' } : job)))
+      .finally(() => { queueDispatchRef.current = false; });
+  }, [jobs, accessKey, codec, quality]);
 
   const activeCount = jobs.filter(job => !TERMINAL.includes(job.status)).length;
   const selectedJob = jobs.find(job => job.requestId === activeJobId) || jobs[0] || null;
@@ -189,11 +206,11 @@ export default function Home() {
     setAdvanced(false);
   }
 
-  async function dispatchRender(sourceZipUrl: string, requestId: string, compositionId: string, selectedCodec = codec, selectedQuality = quality) {
+  async function dispatchRender(sourceZipUrl: string, requestId: string, compositionId: string, selectedCodec = codec, selectedQuality = quality, selectedOutputName = outputName) {
     const response = await fetch('/api/render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-render-studio-key': accessKey.trim() },
-      body: JSON.stringify({ sourceZipUrl, compositionId, codec: selectedCodec, crf: selectedQuality, requestId }),
+      body: JSON.stringify({ sourceZipUrl, compositionId, codec: selectedCodec, crf: selectedQuality, requestId, outputName: selectedOutputName }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Could not start the render.');
@@ -223,15 +240,15 @@ export default function Home() {
       setSourceUrls(current => ({ ...current, [requestId]: blob.url }));
       setStage('dispatching');
       setNotice('Upload selesai. Menyiapkan cloud render…');
-      await dispatchRender(blob.url, requestId, composition.trim());
       const job: RenderJob = {
-        requestId, compositionId: composition.trim(), createdAt: new Date().toISOString(), status: 'queued',
+        requestId, compositionId: composition.trim(), createdAt: new Date().toISOString(), status: 'local_queued',
+        dispatched: false, sourceZipUrl: blob.url, codec, crf: quality, outputName: outputName.trim() || 'render', sourceSizeBytes: file.size,
       };
       setJobs(current => [job, ...current].slice(0, 12));
       setActiveJobId(requestId);
       setFile(null);
       if (fileInput.current) fileInput.current.value = ''; setInspection(EMPTY_INSPECTION);
-      setNotice('Render masuk antrean. Status akan diperbarui otomatis.', 'success');
+      setNotice('Project masuk antrean. Render berikutnya berjalan otomatis setelah job sebelumnya selesai.', 'success');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Terjadi kesalahan saat memulai render.', 'error');
     } finally {
@@ -259,8 +276,7 @@ export default function Home() {
     const requestId = crypto.randomUUID();
     setBusy(true);
     try {
-      await dispatchRender(sourceUrl, requestId, job.compositionId);
-      const retry: RenderJob = { requestId, compositionId: job.compositionId, createdAt: new Date().toISOString(), status: 'queued' };
+      const retry: RenderJob = { requestId, compositionId: job.compositionId, createdAt: new Date().toISOString(), status: 'local_queued', dispatched: false, sourceZipUrl: sourceUrl, codec: job.codec || codec, crf: job.crf || quality, outputName: job.outputName || 'render', sourceSizeBytes: job.sourceSizeBytes };
       setJobs(current => [retry, ...current].slice(0, 12));
       setSourceUrls(current => ({ ...current, [requestId]: sourceUrl }));
       setActiveJobId(requestId);
@@ -331,7 +347,13 @@ export default function Home() {
   const progress = selectedJob?.progress ?? (selectedJob?.status === 'completed' && selectedJob?.conclusion === 'success' ? 100 : 0);
   const completed = selectedJob?.status === 'completed' && selectedJob?.conclusion === 'success';
   const failed = Boolean(selectedJob && ((selectedJob.status === 'completed' && selectedJob.conclusion !== 'success') || selectedJob.status === 'failed'));
-  const running = Boolean(selectedJob && !TERMINAL.includes(selectedJob.status));
+  const running = Boolean(selectedJob && selectedJob.dispatched && !TERMINAL.includes(selectedJob.status));
+  const queuedCount = jobs.filter(job => job.status === 'local_queued').length;
+  const completedJobs = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success' && job.updatedAt && job.sourceSizeBytes);
+  const averageSecondsPerMb = completedJobs.length ? completedJobs.reduce((total, job) => total + ((new Date(job.updatedAt!).getTime() - new Date(job.createdAt).getTime()) / 1000 / Math.max(1, (job.sourceSizeBytes || 1) / 1024 / 1024)), 0) / completedJobs.length : null;
+  const estimatedMinutes = file && averageSecondsPerMb ? Math.max(1, Math.ceil((averageSecondsPerMb * file.size / 1024 / 1024) / 60)) : null;
+  const averageRenderMinutes = completedJobs.length ? Math.round(completedJobs.reduce((total, job) => total + (new Date(job.updatedAt!).getTime() - new Date(job.createdAt).getTime()) / 60000, 0) / completedJobs.length) : null;
+  const errorHint = selectedJob?.error || (selectedJob?.currentStep?.toLowerCase().includes('install') ? 'Dependency gagal dipasang. Periksa lockfile dan versi Node/npm project.' : selectedJob?.currentStep?.toLowerCase().includes('render') ? 'Proses render gagal. Cek asset, composition ID, dan pesan workflow.' : 'Buka workflow logs untuk melihat error asli. Pastikan entry point, dependency, dan asset project tersedia.');
 
   return (
     <main className="studio-shell">
