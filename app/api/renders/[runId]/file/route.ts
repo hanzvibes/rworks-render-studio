@@ -27,6 +27,14 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
 
     const archive = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${artifact.id}/zip`, { headers, redirect: 'manual', cache: 'no-store' });
     const location = archive.headers.get('location');
+    if (new URL(request.url).searchParams.get('mode') === 'archive') {
+      if (archive.status !== 302 || !location) return NextResponse.json({ error: 'GitHub did not provide an artifact download.' }, { status: 502 });
+      // Let the browser download the signed GitHub archive directly. This avoids buffering
+      // large MP4 files inside a Vercel Function response.
+      return NextResponse.json({ downloadUrl: location, filename: `rworks-render-${runId}.zip` }, {
+        headers: { 'Cache-Control': 'private, no-store' },
+      });
+    }
     if (archive.status !== 302 || !location) return NextResponse.json({ error: 'GitHub did not provide an artifact download.' }, { status: 502 });
     const file = await fetch(location, { cache: 'no-store' });
     if (!file.ok) return NextResponse.json({ error: 'Could not download render artifact.' }, { status: 502 });
@@ -42,7 +50,7 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(bytes.byteLength),
-        'Content-Disposition': `inline; filename="${filename}"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
         'X-Render-Filename': filename,
         'Cache-Control': 'private, no-store',
       },
