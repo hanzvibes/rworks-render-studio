@@ -41,6 +41,12 @@ function formatBytes(value?: number | null) {
   while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
   return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unit]}`;
 }
+function formatDuration(start?: string, end?: string) {
+  if (!start || !end) return '—';
+  const seconds = Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000));
+  if (!Number.isFinite(seconds)) return '—';
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
 const MAX_ZIP_ENTRIES = 10000;
 const MAX_ZIP_EXPANDED = 2 * 1024 * 1024 * 1024;
 const MAX_SOURCE_FILE = 2 * 1024 * 1024;
@@ -522,7 +528,7 @@ export default function Home() {
             })}</div>}
             <div className="history-note"><LockKeyhole size={12}/> History stays in this browser. It is not synced across devices.</div>
           </section>
-          {comparableJobs.length > 0 && <section className="panel comparison-panel"><div className="panel-heading compact"><div><span className="heading-icon"><SlidersHorizontal size={16}/></span><div><h2>Output comparison</h2><p>Recent successful render artifacts · ZIP size</p></div></div></div><div className="comparison-list">{comparableJobs.map((job,index)=><div className="comparison-row" key={job.requestId}><span className="comparison-rank">{index+1}</span><div className="comparison-info"><b>{job.compositionId}</b><small>{(job.codec || 'h264').toUpperCase()} · CRF {job.crf || '—'} · {new Date(job.updatedAt || job.createdAt).toLocaleDateString()}</small></div><strong>{formatBytes(job.artifactSizeBytes)}</strong></div>)}</div><p className="comparison-note">Ukuran di atas adalah ukuran paket artifact GitHub (ZIP), bukan ukuran file video mentah. Perbandingan paling adil jika composition dan durasi videonya sama.</p></section>}
+          {comparableJobs.length > 0 && <section className="panel comparison-panel"><div className="panel-heading compact"><div><span className="heading-icon"><SlidersHorizontal size={16}/></span><div><h2>Output comparison</h2><p>Recent successful render artifacts · ZIP size</p></div></div></div><div className="comparison-list">{comparableJobs.map((job,index)=><div className="comparison-row" key={job.requestId}><span className="comparison-rank">{index+1}</span><div className="comparison-info"><b>{job.compositionId}</b><small>{(job.codec || 'h264').toUpperCase()} · CRF {job.crf || '—'} · {formatDuration(job.dispatchedAt || job.createdAt, job.updatedAt)} · {new Date(job.updatedAt || job.createdAt).toLocaleDateString()}</small></div><strong>{formatBytes(job.artifactSizeBytes)}</strong></div>)}</div><p className="comparison-note">Ukuran di atas adalah ukuran paket artifact GitHub (ZIP), bukan ukuran file video mentah. Perbandingan paling adil jika composition dan durasi videonya sama.</p></section>}
           <div className="engine-note"><Gauge size={15}/><span>Powered by GitHub Actions</span><span className="engine-divider"/> <span>Private source storage</span></div>
         </aside>
       </section>
