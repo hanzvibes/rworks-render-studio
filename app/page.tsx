@@ -92,7 +92,7 @@ export default function Home() {
     if (!accessKey.trim()) return;
     let cancelled = false;
     const poll = async () => {
-      const active = jobsRef.current.filter(job => job.dispatched && !TERMINAL.includes(job.status));
+      const active = jobsRef.current.filter(job => job.dispatched !== false && !TERMINAL.includes(job.status));
       for (const job of active) {
         try {
           const response = await fetch(`/api/renders?requestId=${encodeURIComponent(job.requestId)}`, {
@@ -347,7 +347,7 @@ export default function Home() {
   const progress = selectedJob?.progress ?? (selectedJob?.status === 'completed' && selectedJob?.conclusion === 'success' ? 100 : 0);
   const completed = selectedJob?.status === 'completed' && selectedJob?.conclusion === 'success';
   const failed = Boolean(selectedJob && ((selectedJob.status === 'completed' && selectedJob.conclusion !== 'success') || selectedJob.status === 'failed'));
-  const running = Boolean(selectedJob && selectedJob.dispatched && !TERMINAL.includes(selectedJob.status));
+  const running = Boolean(selectedJob && selectedJob.dispatched !== false && !TERMINAL.includes(selectedJob.status));
   const queuedCount = jobs.filter(job => job.status === 'local_queued').length;
   const completedJobs = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success' && job.updatedAt && job.dispatchedAt && job.sourceSizeBytes);
   const averageSecondsPerMb = completedJobs.length ? completedJobs.reduce((total, job) => total + ((new Date(job.updatedAt!).getTime() - new Date(job.dispatchedAt || job.createdAt).getTime()) / 1000 / Math.max(1, (job.sourceSizeBytes || 1) / 1024 / 1024)), 0) / completedJobs.length : null;
