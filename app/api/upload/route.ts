@@ -9,7 +9,10 @@ export async function POST(request: Request) {
     const jsonResponse = await handleUpload({
       body,
       request,
-      onBeforeGenerateToken: async (pathname) => {
+      onBeforeGenerateToken: async (pathname, clientPayload) => {
+        const expectedKey = process.env.RENDER_STUDIO_API_KEY;
+        if (!expectedKey) throw new Error('Render Studio access key is not configured.');
+        if (clientPayload !== expectedKey) throw new Error('Invalid Render Studio access key.');
         if (!pathname.toLowerCase().endsWith('.zip')) {
           throw new Error('Only ZIP archives are allowed.');
         }
