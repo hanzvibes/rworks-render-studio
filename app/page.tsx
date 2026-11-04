@@ -118,7 +118,7 @@ export default function Home() {
       const expandedSize = entries.reduce((total, entry) => total + ((entry as typeof entry & { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0), 0);
       if (expandedSize > MAX_ZIP_EXPANDED) throw new Error('Ukuran hasil ekstraksi ZIP melebihi batas 2 GB.');
 
-      const packageFiles = entries.filter(entry => /(^|\\/)package\\.json$/i.test(entry.name));
+      const packageFiles = entries.filter(entry => /(^|\/)package\.json$/i.test(entry.name));
       if (!packageFiles.length) throw new Error('package.json tidak ditemukan. Pastikan ZIP berisi root project Remotion.');
       const rootPackage = packageFiles.sort((a, b) => a.name.split('/').length - b.name.split('/').length)[0];
       const packageText = await rootPackage.async('text');
@@ -137,12 +137,12 @@ export default function Home() {
         .find(name => entries.some(entry => entry.name === rootPrefix + name));
       const sourceEntries = entries.filter(entry =>
         entry.name.startsWith(rootPrefix) &&
-        /\\.(tsx?|jsx?)$/i.test(entry.name) &&
-        !/(^|\\/)(node_modules|\.next|dist|build)\\//.test(entry.name) &&
+        /\.(tsx?|jsx?)$/i.test(entry.name) &&
+        !/(^|\/)(node_modules|\.next|dist|build)\//.test(entry.name) &&
         ((entry as typeof entry & { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? MAX_SOURCE_FILE + 1) <= MAX_SOURCE_FILE
       );
       const found = new Set<string>();
-      const compositionPattern = /\\bid\\s*=\\s*(?:\\{\\s*)?(['"`])([A-Za-z0-9_-]{1,120})\\1/g;
+      const compositionPattern = /\bid\s*=\s*(?:\{\s*)?(['"`])([A-Za-z0-9_-]{1,120})\1/g;
       for (const entry of sourceEntries.slice(0, 1500)) {
         const source = await entry.async('text');
         let match: RegExpExecArray | null;
@@ -158,7 +158,7 @@ export default function Home() {
       const entryPoint = packageJson.remotion?.entryPoint;
       const result: ProjectInspection = {
         status: warnings.length ? 'warning' : 'ready',
-        projectName: packageJson.name || rootPackage.name.replace(/(^|\\/)package\\.json$/, ''),
+        projectName: packageJson.name || rootPackage.name.replace(/(^|\/)package\.json$/, ''),
         remotionVersion,
         entryPoint,
         lockfile,
