@@ -57,6 +57,7 @@ export default function Home() {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [cancelling, setCancelling] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewJobId, setPreviewJobId] = useState<number | null>(null);
   const [previewLoading, setPreviewLoading] = useState<number | null>(null);
@@ -232,6 +233,18 @@ export default function Home() {
     }
   }
 
+  async function cancelRender(job: RenderJob) {
+    if (!job.runId) return setNotice('Workflow belum terdaftar di GitHub Actions. Coba lagi sebentar.', 'info');
+    if (!window.confirm('Batalkan render ini? Proses yang sedang berjalan akan dihentikan.')) return;
+    setCancelling(job.runId);
+    try {
+      const response = await fetch(`/api/renders/${job.runId}/cancel`, { method: 'POST', headers: { 'x-render-studio-key': accessKey.trim() } });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Tidak bisa membatalkan render.');
+      setNotice('Permintaan pembatalan dikirim. Status akan diperbarui otomatis.', 'success');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Tidak bisa membatalkan render.', 'error'); }
+    finally { setCancelling(null); }
+  }
   async function retryRender(job: RenderJob) {
     const sourceUrl = sourceUrls[job.requestId];
     if (!sourceUrl) return setNotice('Sumber ZIP tidak tersedia di sesi ini. Upload ulang project untuk menjalankan render baru.', 'error');
@@ -426,6 +439,7 @@ export default function Home() {
                 })}
               </div>
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
+              {running&&selectedJob.runId&&<div className="success-helper"><AlertCircle size={15}/><div><b>Render sedang berjalan</b><small>Batalkan untuk menghentikan antrean atau proses render.</small></div><button type="button" onClick={()=>void cancelRender(selectedJob)} disabled={cancelling===selectedJob.runId}>{cancelling===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<X size={14}/>} Cancel render</button></div>}
               {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>Open workflow logs to see the exact error. If the source ZIP is still available in this session, you can retry.</p></div>{sourceUrls[selectedJob.requestId]&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
               {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
             </div> : <div className="empty-state"><span><Film size={23}/></span><b>Your next render starts here</b><p>Upload a Remotion project to see live progress, workflow steps and finished outputs.</p></div>}
