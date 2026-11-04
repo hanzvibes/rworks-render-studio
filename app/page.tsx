@@ -52,6 +52,7 @@ export default function Home() {
   const [advanced, setAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<'idle' | 'uploading' | 'dispatching'>('idle');
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'info' | 'error' | 'success'>('info');
   const [jobs, setJobs] = useState<RenderJob[]>([]);
@@ -208,9 +209,15 @@ export default function Home() {
     setBusy(true);
     try {
       setStage('uploading');
+      setUploadProgress(0);
       setNotice('Mengunggah project ke private storage…');
       const blob = await upload(file.name, file, {
-        access: 'private', handleUploadUrl: '/api/upload', clientPayload: accessKey.trim(),
+        access: 'private',
+        handleUploadUrl: '/api/upload',
+        clientPayload: accessKey.trim(),
+        // Vercel recommends multipart uploads for files larger than 100 MB.
+        multipart: file.size > 100 * 1024 * 1024,
+        onUploadProgress: ({ percentage }) => setUploadProgress(Math.round(percentage)),
       });
       const requestId = crypto.randomUUID();
       setSourceUrls(current => ({ ...current, [requestId]: blob.url }));
@@ -230,6 +237,7 @@ export default function Home() {
     } finally {
       setBusy(false);
       setStage('idle');
+      setUploadProgress(0);
     }
   }
 
@@ -415,8 +423,9 @@ export default function Home() {
           </div>
 
           <button type="button" className="render-button" onClick={() => void startRender()} disabled={busy || !file || inspection.status === 'scanning' || !composition.trim() || !accessKey.trim()}>
-            {busy ? <><LoaderCircle size={17} className="spin"/>{stage === 'uploading' ? 'Uploading project…' : 'Starting cloud render…'}</> : <><Play size={16} fill="currentColor"/> Render project <ArrowUpRight size={16}/></>}
+            {busy ? <><LoaderCircle size={17} className="spin"/>{stage === 'uploading' ? `Uploading ${uploadProgress}%…` : 'Starting cloud render…'}</> : <><Play size={16} fill="currentColor"/> Render project <ArrowUpRight size={16}/></>}
           </button>
+          {stage === 'uploading' && <div className="upload-progress" role="status" aria-live="polite"><div className="upload-progress-meta"><span>Uploading project to private storage</span><b>{uploadProgress}%</b></div><div className="upload-progress-track"><div className="upload-progress-fill" style={{ width: `${uploadProgress}%` }}/></div><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · ` : ''}Large archives use resumable multipart transfer.</small></div>}
           <p className="secure-note"><LockKeyhole size={12}/> Source uploads use private storage. Your access key is not saved to render history.</p>
           {message && <div className={`notice ${messageType}`} role="status" aria-live="polite">{messageType === 'error' ? <AlertCircle size={15}/> : messageType === 'success' ? <CheckCircle2 size={15}/> : <Activity size={15}/>}<span>{message}</span></div>}
         </div>
