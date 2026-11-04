@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/dispatches`, {
       method: 'POST',
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref: 'main', inputs: {
+      body: JSON.stringify({ ref: process.env.VERCEL_GIT_COMMIT_REF || 'main', inputs: {
         request_id: body.requestId,
         source_zip_url: sourceUrl.toString(),
         composition_id: body.compositionId.trim(),
