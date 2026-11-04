@@ -38,7 +38,7 @@ export async function POST(request: Request) {
         composition_id: body.compositionId.trim(),
         codec,
         crf,
-        output_name: 'render.mp4',
+        output_name: codec === 'vp8' ? 'render.webm' : 'render.mp4',
       } }),
       cache: 'no-store',
     });
