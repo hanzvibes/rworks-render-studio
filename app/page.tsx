@@ -57,6 +57,9 @@ export default function Home() {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [downloading, setDownloading] = useState<number | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewJobId, setPreviewJobId] = useState<number | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<number | null>(null);
   const [expandedStep, setExpandedStep] = useState<string | null>(null);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [sourceUrls, setSourceUrls] = useState<Record<string, string>>({});
@@ -246,26 +249,49 @@ export default function Home() {
     } finally { setBusy(false); }
   }
 
+  useEffect(() => {
+    return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [previewUrl]);
+
+  async function fetchRenderedVideo(runId: number) {
+    const response = await fetch(`/api/renders/${runId}/file`, {
+      headers: { 'x-render-studio-key': accessKey.trim() },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || 'File video belum tersedia.');
+    }
+    return { blob: await response.blob(), filename: response.headers.get('x-render-filename') || `rworks-render-${runId}.mp4` };
+  }
+
+  async function previewRender(runId: number) {
+    setPreviewLoading(runId);
+    try {
+      const { blob } = await fetchRenderedVideo(runId);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewJobId(runId);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Preview tidak dapat dimuat.', 'error');
+    } finally { setPreviewLoading(null); }
+  }
+
   async function downloadArtifact(runId: number) {
     setDownloading(runId);
     try {
-      const response = await fetch(`/api/renders/${runId}/download`, { headers: { 'x-render-studio-key': accessKey.trim() } });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Download artifact gagal.');
-      }
-      const blob = await response.blob();
+      const { blob, filename } = await fetchRenderedVideo(runId);
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `rworks-render-${runId}.zip`;
+      anchor.download = filename;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('Artifact siap diunduh.', 'success');
+      setNotice('Video berhasil disiapkan untuk diunduh.', 'success');
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : 'Download artifact gagal.', 'error');
+      setNotice(error instanceof Error ? error.message : 'Download video gagal.', 'error');
     } finally { setDownloading(null); }
   }
 
@@ -401,7 +427,7 @@ export default function Home() {
               </div>
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
               {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>Open workflow logs to see the exact error. If the source ZIP is still available in this session, you can retry.</p></div>{sourceUrls[selectedJob.requestId]&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
-              {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your render is ready</b><small>Output is available as a ZIP artifact.</small></div><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download</button></div>}
+              {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
             </div> : <div className="empty-state"><span><Film size={23}/></span><b>Your next render starts here</b><p>Upload a Remotion project to see live progress, workflow steps and finished outputs.</p></div>}
           </section>
 

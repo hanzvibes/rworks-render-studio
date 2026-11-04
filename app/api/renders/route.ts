@@ -52,7 +52,7 @@ export async function GET(request: Request) {
       if (artifactsResponse.ok) {
         const artifacts = await artifactsResponse.json();
         if (artifacts.artifacts?.some((artifact: { name: string; expired: boolean }) => artifact.name === 'remotion-render' && !artifact.expired)) {
-          artifactUrl = `/api/renders/${run.id}/download`;
+          artifactUrl = `/api/renders/${run.id}/file`;
         }
       }
     }
