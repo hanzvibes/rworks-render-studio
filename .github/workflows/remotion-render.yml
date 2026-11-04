@@ -1,10 +1,14 @@
 name: Remotion Cloud Render
-run-name: Render ${{ inputs.composition_id }}
+run-name: Render ${{ inputs.composition_id }} [${{ inputs.request_id }}]
 on:
   workflow_dispatch:
     inputs:
+      request_id:
+        description: Unique dashboard request ID
+        required: true
+        type: string
       source_zip_url:
-        description: Public URL to the Remotion project ZIP
+        description: Private Vercel Blob URL to the Remotion project ZIP
         required: true
         type: string
       composition_id:
