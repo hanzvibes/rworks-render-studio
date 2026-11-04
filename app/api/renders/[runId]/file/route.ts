@@ -15,7 +15,7 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
   const repo = process.env.GITHUB_REPO;
   const { runId } = await context.params;
   if (!token || !owner || !repo) return NextResponse.json({ error: 'GitHub Actions credentials are not configured.' }, { status: 503 });
-  if (!/^\\d+$/.test(runId)) return NextResponse.json({ error: 'Invalid workflow run ID.' }, { status: 400 });
+  if (!/^\d+$/.test(runId)) return NextResponse.json({ error: 'Invalid workflow run ID.' }, { status: 400 });
 
   const headers = { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
   try {
@@ -32,7 +32,7 @@ export async function GET(request: Request, context: { params: Promise<{ runId: 
     if (!file.ok) return NextResponse.json({ error: 'Could not download render artifact.' }, { status: 502 });
 
     const zip = await JSZip.loadAsync(await file.arrayBuffer());
-    const video = Object.values(zip.files).find(entry => !entry.dir && /\\.(mp4|webm)$/i.test(entry.name));
+    const video = Object.values(zip.files).find(entry => !entry.dir && /\.(mp4|webm)$/i.test(entry.name));
     if (!video) return NextResponse.json({ error: 'No MP4 or WebM video was found in the render artifact.' }, { status: 404 });
     const bytes = await video.async('uint8array');
     const filename = video.name.split('/').pop()?.replace(/[^a-zA-Z0-9._-]/g, '-') || `render-${runId}.mp4`;
