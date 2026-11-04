@@ -163,6 +163,25 @@ export default function Home() {
     } finally { setBusy(false); }
   }
 
+  async function cancelRender(job: RenderJob) {
+    if (!job.runId) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/renders/${job.runId}/cancel`, {
+        method: 'POST',
+        headers: { 'x-render-studio-key': accessKey.trim() },
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not cancel this render.');
+      setJobs(current => current.map(item => item.requestId === job.requestId ? { ...item, status: 'cancelled', conclusion: 'cancelled' } : item));
+      setNotice('Render cancellation requested.', 'success');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not cancel this render.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function downloadArtifact(runId: number) {
     setDownloading(runId);
     try {
@@ -303,6 +322,7 @@ export default function Home() {
                 })}
               </div>
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
+              {running&&selectedJob.runId&&<div className="cancel-row"><button type="button" className="text-action" onClick={()=>void cancelRender(selectedJob)} disabled={busy}><X size={13}/> Cancel render</button></div>}
               {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>Open workflow logs to see the exact error. If the source ZIP is still available in this session, you can retry.</p></div>{sourceUrls[selectedJob.requestId]&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
               {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your render is ready</b><small>Output is available as a ZIP artifact.</small></div><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download</button></div>}
             </div> : <div className="empty-state"><span><Film size={23}/></span><b>Your next render starts here</b><p>Upload a Remotion project to see live progress, workflow steps and finished outputs.</p></div>}
