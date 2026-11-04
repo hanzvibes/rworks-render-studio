@@ -17,8 +17,9 @@ export async function GET(request: Request) {
   if (!requestId || !/^[a-zA-Z0-9-]{8,80}$/.test(requestId)) return NextResponse.json({ error: 'Invalid render request ID.' }, { status: 400 });
 
   try {
-    const branch = process.env.VERCEL_GIT_COMMIT_REF || 'main';
-    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?branch=${encodeURIComponent(branch)}&event=workflow_dispatch&per_page=30`, {
+    // Search by the unique request ID across branches. Preview deployments may dispatch
+    // workflows from a different ref than the production deployment.
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow}/runs?event=workflow_dispatch&per_page=100`, {
       headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
       cache: 'no-store',
     });
@@ -32,7 +33,14 @@ export async function GET(request: Request) {
       cache: 'no-store',
     });
     const jobsData = jobsResponse.ok ? await jobsResponse.json() : { jobs: [] };
-    const steps = (jobsData.jobs?.[0]?.steps || []).map((step: { name: string; status: string; conclusion: string | null }) => ({
+    const jobs = jobsData.jobs || [];
+    const allJobsCompleted = jobs.length > 0 && jobs.every((job: { status: string }) => job.status === 'completed');
+    const allJobsSucceeded = allJobsCompleted && jobs.every((job: { conclusion: string | null }) => job.conclusion === 'success');
+    // GitHub can leave a workflow run marked in_progress after its job and all post-job steps completed.
+    // Reconcile the dashboard state from authoritative job conclusions instead of polling forever.
+    const effectiveStatus = run.status === 'in_progress' && allJobsCompleted ? 'completed' : run.status;
+    const effectiveConclusion = run.conclusion ?? (allJobsCompleted ? (allJobsSucceeded ? 'success' : 'failure') : null);
+    const steps = (jobs[0]?.steps || []).map((step: { name: string; status: string; conclusion: string | null }) => ({
       name: step.name,
       status: step.status,
       conclusion: step.conclusion,
@@ -41,10 +49,10 @@ export async function GET(request: Request) {
     const progress = steps.length ? Math.round((completedSteps / steps.length) * 100) : run.status === 'completed' ? 100 : 0;
     const currentStep = steps.find((step: { status: string }) => step.status === 'in_progress')?.name
       || steps.find((step: { status: string; conclusion: string | null }) => step.status === 'completed' && step.conclusion === 'failure')?.name
-      || (run.status === 'completed' ? 'Render finished' : 'Waiting for runner');
+      || (effectiveStatus === 'completed' ? 'Render finished' : 'Waiting for runner');
 
     let artifactUrl: string | null = null;
-    if (run.status === 'completed' && run.conclusion === 'success') {
+    if (effectiveStatus === 'completed' && effectiveConclusion === 'success') {
       const artifactsResponse = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/runs/${run.id}/artifacts`, {
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' },
         cache: 'no-store',
@@ -60,8 +68,8 @@ export async function GET(request: Request) {
     return NextResponse.json({
       requestId,
       runId: run.id,
-      status: run.status,
-      conclusion: run.conclusion,
+      status: effectiveStatus,
+      conclusion: effectiveConclusion,
       displayTitle: run.display_title,
       htmlUrl: run.html_url,
       createdAt: run.created_at,
