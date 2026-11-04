@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     const codec = body.codec || 'h264';
     const crf = body.crf || '18';
     if (!allowedCodecs.has(codec) || !allowedCrf.has(crf)) return NextResponse.json({ error: 'Invalid render settings.' }, { status: 400 });
-    const requestedName = (body.outputName || 'render').replace(/\\.(mp4|webm)$/i, '');
+    const requestedName = (body.outputName || 'render').replace(/\.(mp4|webm)$/i, '');
     const safeName = requestedName.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60) || 'render';
     const outputName = safeName + (codec === 'vp8' ? '.webm' : '.mp4');
 
