@@ -271,7 +271,7 @@ export default function Home() {
     finally { setCancelling(null); }
   }
   async function retryRender(job: RenderJob) {
-    const sourceUrl = sourceUrls[job.requestId];
+    const sourceUrl = sourceUrls[job.requestId] || job.sourceZipUrl;
     if (!sourceUrl) return setNotice('Sumber ZIP tidak tersedia di sesi ini. Upload ulang project untuk menjalankan render baru.', 'error');
     const requestId = crypto.randomUUID();
     setBusy(true);
@@ -431,6 +431,13 @@ export default function Home() {
             <p className="preset-description">{presetInfo.detail}</p>
           </div>
 
+          <div className="form-section">
+            <div className="field-heading"><label htmlFor="output-name">OUTPUT FILE NAME</label><span>WITHOUT EXTENSION</span></div>
+            <input id="output-name" className="text-input" value={outputName} maxLength={60} onChange={event => setOutputName(event.target.value.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^[-.]+/, ''))} placeholder="my-remotion-video" />
+            <p className="field-hint">File akhir otomatis memakai .mp4 atau .webm sesuai codec.</p>
+            <p className="field-hint">{estimatedMinutes ? `Estimasi kasar: sekitar ${estimatedMinutes} menit, berdasarkan ${completedJobs.length} render sebelumnya.` : 'Estimasi waktu muncul setelah ada riwayat render yang bisa dibandingkan.'}</p>
+          </div>
+
           <div className="advanced-wrap">
             <button type="button" className="advanced-toggle" onClick={() => setAdvanced(value => !value)} aria-expanded={advanced}><Settings2 size={15}/> Advanced settings <ChevronDown size={15} className={advanced ? 'rotate' : ''}/></button>
             {advanced && <div className="advanced-fields">
@@ -455,9 +462,10 @@ export default function Home() {
         <aside className="right-column">
           <section className="panel activity-panel">
             <div className="panel-heading"><div><span className="section-index">02</span><div><h2>Render activity</h2><p>Track your cloud jobs</p></div></div><span className="live-indicator"><i/> LIVE</span></div>
-            <div className="stats-row"><div><strong>{jobs.length}</strong><span>Total renders</span></div><div><strong>{activeCount}</strong><span>In progress</span></div><div><strong>{failedJobs}</strong><span>Needs attention</span></div></div>
+            <div className="stats-row"><div><strong>{jobs.length}</strong><span>Total renders</span></div><div><strong>{queuedCount + activeCount}</strong><span>Queue / active</span></div><div><strong>{failedJobs}</strong><span>Failed</span></div></div>
+            <div className="usage-strip"><span>Completed <b>{completedJobs.length}</b></span><span>Avg. render <b>{averageRenderMinutes === null ? '—' : `${averageRenderMinutes} min`}</b></span><span>Queue <b>{queuedCount}</b></span></div>
             {selectedJob ? <div className="active-render">
-              <div className="render-title-row"><div><span className="render-overline">SELECTED RENDER</span><b>{selectedJob.compositionId}</b></div><span className={`state-pill ${completed ? 'success' : failed ? 'error' : 'working'}`}>{completed ? 'Completed' : failed ? 'Failed' : selectedJob.status === 'queued' ? 'Queued' : 'Rendering'}</span></div>
+              <div className="render-title-row"><div><span className="render-overline">SELECTED RENDER</span><b>{selectedJob.compositionId}</b></div><span className={`state-pill ${completed ? 'success' : failed ? 'error' : 'working'}`}>{completed ? 'Completed' : failed ? 'Failed' : selectedJob.status === 'local_queued' ? 'In queue' : selectedJob.status === 'queued' ? 'Queued' : 'Rendering'}</span></div>
               <div className="progress-meta"><span>{selectedJob.currentStep || (completed ? 'Render finished' : failed ? 'Render needs attention' : 'Waiting for runner')}</span><b>{progress}%</b></div>
               <div className="progress-track"><div className="progress-fill" style={{width:`${progress}%`}}/></div>
               <div className="timeline">
@@ -477,7 +485,7 @@ export default function Home() {
               </div>
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
               {running&&selectedJob.runId&&<div className="success-helper"><AlertCircle size={15}/><div><b>Render sedang berjalan</b><small>Batalkan untuk menghentikan antrean atau proses render.</small></div><button type="button" onClick={()=>void cancelRender(selectedJob)} disabled={cancelling===selectedJob.runId}>{cancelling===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<X size={14}/>} Cancel render</button></div>}
-              {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>Open workflow logs to see the exact error. If the source ZIP is still available in this session, you can retry.</p></div>{sourceUrls[selectedJob.requestId]&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
+              {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>{errorHint}</p></div>{(sourceUrls[selectedJob.requestId] || selectedJob.sourceZipUrl)&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
               {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video (.zip)</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
             </div> : <div className="empty-state"><span><Film size={23}/></span><b>Your next render starts here</b><p>Upload a Remotion project to see live progress, workflow steps and finished outputs.</p></div>}
           </section>
@@ -491,7 +499,7 @@ export default function Home() {
               return <button type="button" className={`job-row ${isSelected?'selected':''}`} key={job.requestId} onClick={()=>setActiveJobId(job.requestId)}>
                 <span className={`job-icon ${isDone?'done':isFailed?'failed':'pending'}`}>{isDone?<Check size={15}/>:isFailed?<AlertCircle size={15}/>:<LoaderCircle size={15} className="spin"/>}</span>
                 <span className="job-info"><b>{job.compositionId}</b><small>{new Date(job.createdAt).toLocaleString()}</small></span>
-                <span className="job-status">{isDone?'Ready':isFailed?'Failed':job.status==='queued'?'Queued':'Running'}</span>
+                <span className="job-status">{isDone?'Ready':isFailed?'Failed':job.status==='local_queued'?'In queue':job.status==='queued'?'Queued':'Running'}</span>
               </button>;
             })}</div>}
             <div className="history-note"><LockKeyhole size={12}/> History stays in this browser. It is not synced across devices.</div>
