@@ -16,7 +16,7 @@ type RenderJob = {
   conclusion?: string | null; runId?: number; htmlUrl?: string; artifactUrl?: string | null;
   progress?: number; currentStep?: string; steps?: Step[];
   dispatched?: boolean; dispatchedAt?: string; sourceZipUrl?: string; codec?: string; crf?: string; outputName?: string;
-  sourceSizeBytes?: number; error?: string; updatedAt?: string;
+  sourceSizeBytes?: number; artifactSizeBytes?: number | null; error?: string; updatedAt?: string;
 };
 type Preset = 'draft' | 'standard' | 'final';
 type ProjectInspection = {
@@ -32,6 +32,15 @@ type ProjectInspection = {
 const STORAGE_KEY = 'rworks-render-jobs-v1';
 const TERMINAL = ['completed', 'failed', 'cancelled'];
 const EMPTY_INSPECTION: ProjectInspection = { status: 'idle', compositions: [], warnings: [] };
+function formatBytes(value?: number | null) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—';
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[unit]}`;
+}
 const MAX_ZIP_ENTRIES = 10000;
 const MAX_ZIP_EXPANDED = 2 * 1024 * 1024 * 1024;
 const MAX_SOURCE_FILE = 2 * 1024 * 1024;
@@ -112,7 +121,7 @@ export default function Home() {
   useEffect(() => {
     if (!accessKey.trim() || queueDispatchRef.current) return;
     const snapshot = jobsRef.current;
-    const hasCloudJob = snapshot.some(job => job.dispatched && !TERMINAL.includes(job.status));
+    const hasCloudJob = snapshot.some(job => job.dispatched !== false && !TERMINAL.includes(job.status));
     const next = snapshot.filter(job => job.status === 'local_queued' && job.sourceZipUrl).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))[0];
     if (hasCloudJob || !next) return;
     queueDispatchRef.current = true;
@@ -122,7 +131,7 @@ export default function Home() {
       .finally(() => { queueDispatchRef.current = false; });
   }, [jobs, accessKey, codec, quality]);
 
-  const activeCount = jobs.filter(job => job.dispatched && !TERMINAL.includes(job.status)).length;
+  const activeCount = jobs.filter(job => job.dispatched !== false && !TERMINAL.includes(job.status)).length;
   const selectedJob = jobs.find(job => job.requestId === activeJobId) || jobs[0] || null;
   const failedJobs = jobs.filter(job => (job.status === 'completed' && job.conclusion !== 'success') || job.status === 'failed').length;
   const presetInfo = PRESETS[preset];
@@ -270,6 +279,12 @@ export default function Home() {
     } catch (error) { setNotice(error instanceof Error ? error.message : 'Tidak bisa membatalkan render.', 'error'); }
     finally { setCancelling(null); }
   }
+  function cancelQueuedRender(job: RenderJob) {
+    if (job.status !== 'local_queued') return;
+    setJobs(current => current.map(item => item.requestId === job.requestId ? { ...item, status: 'cancelled', error: 'Cancelled before dispatch.' } : item));
+    setNotice(`Render ${job.compositionId} dihapus dari antrean.`, 'success');
+  }
+
   async function retryRender(job: RenderJob) {
     const sourceUrl = sourceUrls[job.requestId] || job.sourceZipUrl;
     if (!sourceUrl) return setNotice('Sumber ZIP tidak tersedia di sesi ini. Upload ulang project untuk menjalankan render baru.', 'error');
@@ -353,6 +368,7 @@ export default function Home() {
   const averageSecondsPerMb = completedJobs.length ? completedJobs.reduce((total, job) => total + ((new Date(job.updatedAt!).getTime() - new Date(job.dispatchedAt || job.createdAt).getTime()) / 1000 / Math.max(1, (job.sourceSizeBytes || 1) / 1024 / 1024)), 0) / completedJobs.length : null;
   const estimatedMinutes = file && averageSecondsPerMb ? Math.max(1, Math.ceil((averageSecondsPerMb * file.size / 1024 / 1024) / 60)) : null;
   const averageRenderMinutes = completedJobs.length ? Math.round(completedJobs.reduce((total, job) => total + (new Date(job.updatedAt!).getTime() - new Date(job.dispatchedAt || job.createdAt).getTime()) / 60000, 0) / completedJobs.length) : null;
+  const comparableJobs = jobs.filter(job => job.status === 'completed' && job.conclusion === 'success' && typeof job.artifactSizeBytes === 'number').sort((a, b) => Date.parse(b.updatedAt || b.createdAt) - Date.parse(a.updatedAt || a.createdAt)).slice(0, 3);
   const errorHint = selectedJob?.error || (selectedJob?.currentStep?.toLowerCase().includes('install') ? 'Dependency gagal dipasang. Periksa lockfile dan versi Node/npm project.' : selectedJob?.currentStep?.toLowerCase().includes('render') ? 'Proses render gagal. Cek asset, composition ID, dan pesan workflow.' : 'Buka workflow logs untuk melihat error asli. Pastikan entry point, dependency, dan asset project tersedia.');
 
   return (
@@ -484,6 +500,7 @@ export default function Home() {
                 })}
               </div>
               <div className="activity-foot"><span><Clock3 size={12}/> Updated automatically every 6 seconds</span>{selectedJob.htmlUrl&&<a href={selectedJob.htmlUrl} target="_blank" rel="noreferrer">Workflow logs <ExternalLink size={12}/></a>}</div>
+              {selectedJob.status === 'local_queued' && <div className="success-helper"><Clock3 size={15}/><div><b>Waiting in render queue</b><small>This job will start automatically after the active render finishes.</small></div><button type="button" onClick={()=>cancelQueuedRender(selectedJob)}><X size={14}/> Remove from queue</button></div>}
               {running&&selectedJob.runId&&<div className="success-helper"><AlertCircle size={15}/><div><b>Render sedang berjalan</b><small>Batalkan untuk menghentikan antrean atau proses render.</small></div><button type="button" onClick={()=>void cancelRender(selectedJob)} disabled={cancelling===selectedJob.runId}>{cancelling===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<X size={14}/>} Cancel render</button></div>}
               {failed&&<div className="error-helper"><AlertCircle size={15}/><div><b>Render did not finish</b><p>{errorHint}</p></div>{(sourceUrls[selectedJob.requestId] || selectedJob.sourceZipUrl)&&<button type="button" onClick={()=>void retryRender(selectedJob)} disabled={busy}><RotateCcw size={13}/> Retry</button>}</div>}
               {completed&&selectedJob.runId&&<div className="success-helper"><CheckCircle2 size={16}/><div><b>Your video is ready</b><small>Preview or download the rendered video directly.</small></div><button type="button" onClick={()=>void previewRender(selectedJob.runId!)} disabled={previewLoading===selectedJob.runId}>{previewLoading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<Play size={14}/>} Preview</button><button type="button" onClick={()=>void downloadArtifact(selectedJob.runId!)} disabled={downloading===selectedJob.runId}>{downloading===selectedJob.runId?<LoaderCircle size={14} className="spin"/>:<ArrowDownToLine size={14}/>} Download video (.zip)</button></div>}{previewJobId===selectedJob.runId&&previewUrl&&<div className="video-preview"><video controls playsInline preload="metadata" src={previewUrl}/><div className="video-preview-caption"><Film size={13}/> Render preview · {selectedJob.compositionId}</div></div>}
@@ -499,11 +516,12 @@ export default function Home() {
               return <button type="button" className={`job-row ${isSelected?'selected':''}`} key={job.requestId} onClick={()=>setActiveJobId(job.requestId)}>
                 <span className={`job-icon ${isDone?'done':isFailed?'failed':'pending'}`}>{isDone?<Check size={15}/>:isFailed?<AlertCircle size={15}/>:<LoaderCircle size={15} className="spin"/>}</span>
                 <span className="job-info"><b>{job.compositionId}</b><small>{new Date(job.createdAt).toLocaleString()}</small></span>
-                <span className="job-status">{isDone?'Ready':isFailed?'Failed':job.status==='local_queued'?'In queue':job.status==='queued'?'Queued':'Running'}</span>
+                <span className="job-status">{isDone?'Ready':isFailed?'Failed':job.status==='local_queued'?'In queue':job.status==='cancelled'?'Cancelled':job.status==='queued'?'Queued':'Running'}</span>
               </button>;
             })}</div>}
             <div className="history-note"><LockKeyhole size={12}/> History stays in this browser. It is not synced across devices.</div>
           </section>
+          {comparableJobs.length > 0 && <section className="panel comparison-panel"><div className="panel-heading compact"><div><span className="heading-icon"><SlidersHorizontal size={16}/></span><div><h2>Output comparison</h2><p>Recent successful render artifacts · ZIP size</p></div></div></div><div className="comparison-list">{comparableJobs.map((job,index)=><div className="comparison-row" key={job.requestId}><span className="comparison-rank">{index+1}</span><div className="comparison-info"><b>{job.compositionId}</b><small>{(job.codec || 'h264').toUpperCase()} · CRF {job.crf || '—'} · {new Date(job.updatedAt || job.createdAt).toLocaleDateString()}</small></div><strong>{formatBytes(job.artifactSizeBytes)}</strong></div>)}</div><p className="comparison-note">Ukuran di atas adalah ukuran paket artifact GitHub (ZIP), bukan ukuran file video mentah. Perbandingan paling adil jika composition dan durasi videonya sama.</p></section>}
           <div className="engine-note"><Gauge size={15}/><span>Powered by GitHub Actions</span><span className="engine-divider"/> <span>Private source storage</span></div>
         </aside>
       </section>
