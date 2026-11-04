@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
 import { Film, FolderUp, Gauge, Play, Clock3, Settings2, CircleCheck, LoaderCircle, CircleX, Download, ExternalLink, RefreshCw } from 'lucide-react';
 
@@ -28,6 +28,8 @@ export default function Home() {
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [downloading, setDownloading] = useState<number | null>(null);
+  const jobsRef = useRef<RenderJob[]>([]);
+  jobsRef.current = jobs;
 
   useEffect(() => {
     try {
@@ -42,9 +44,9 @@ export default function Home() {
   }, [jobs, hydrated]);
 
   useEffect(() => {
-    if (!accessKey || jobs.every(job => job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled')) return;
+    if (!accessKey) return;
     const poll = async () => {
-      const active = jobs.filter(job => !['completed', 'failed', 'cancelled'].includes(job.status));
+      const active = jobsRef.current.filter(job => !['completed', 'failed', 'cancelled'].includes(job.status));
       for (const job of active) {
         try {
           const response = await fetch(`/api/renders?requestId=${encodeURIComponent(job.requestId)}`, {
@@ -60,7 +62,7 @@ export default function Home() {
     void poll();
     const timer = window.setInterval(() => void poll(), 5000);
     return () => window.clearInterval(timer);
-  }, [accessKey, jobs]);
+  }, [accessKey]);
 
   async function startRender() {
     if (!accessKey.trim()) return setMessage('Enter your Render Studio access key first.');
