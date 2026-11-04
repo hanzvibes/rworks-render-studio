@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { upload } from '@vercel/blob/client';
+import JSZip from 'jszip';
 import {
   Activity, AlertCircle, ArrowDownToLine, ArrowUpRight, Check, CheckCircle2, ChevronDown,
   CircleHelp, Clock3, CloudUpload, ExternalLink, Film, FolderOpen, Gauge, History,
@@ -16,8 +17,22 @@ type RenderJob = {
   progress?: number; currentStep?: string; steps?: Step[];
 };
 type Preset = 'draft' | 'standard' | 'final';
+type ProjectInspection = {
+  status: 'idle' | 'scanning' | 'ready' | 'warning' | 'error';
+  projectName?: string;
+  remotionVersion?: string;
+  entryPoint?: string;
+  lockfile?: string;
+  compositions: string[];
+  warnings: string[];
+  error?: string;
+};
 const STORAGE_KEY = 'rworks-render-jobs-v1';
 const TERMINAL = ['completed', 'failed', 'cancelled'];
+const EMPTY_INSPECTION: ProjectInspection = { status: 'idle', compositions: [], warnings: [] };
+const MAX_ZIP_ENTRIES = 10000;
+const MAX_ZIP_EXPANDED = 2 * 1024 * 1024 * 1024;
+const MAX_SOURCE_FILE = 2 * 1024 * 1024;
 
 const PRESETS: Record<Preset, { label: string; description: string; codec: string; crf: string; detail: string }> = {
   draft: { label: 'Draft', description: 'Fast review', codec: 'h264', crf: '28', detail: 'Smaller file · Faster export' },
@@ -27,6 +42,7 @@ const PRESETS: Record<Preset, { label: string; description: string; codec: strin
 
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
+  const [inspection, setInspection] = useState<ProjectInspection>(EMPTY_INSPECTION);
   const [composition, setComposition] = useState('');
   const [accessKey, setAccessKey] = useState('');
   const [showKey, setShowKey] = useState(false);
@@ -89,6 +105,73 @@ export default function Home() {
   const failedJobs = jobs.filter(job => (job.status === 'completed' && job.conclusion !== 'success') || job.status === 'failed').length;
   const presetInfo = PRESETS[preset];
 
+  async function inspectProject(selectedFile: File) {
+    setInspection({ status: 'scanning', compositions: [], warnings: [] });
+    setComposition('');
+    try {
+      const zip = await JSZip.loadAsync(selectedFile, { checkCRC32: false, createFolders: false });
+      const entries = Object.values(zip.files).filter(entry => !entry.dir);
+      if (entries.length > MAX_ZIP_ENTRIES) throw new Error('ZIP memiliki lebih dari 10.000 file.');
+      const expandedSize = entries.reduce((total, entry) => total + ((entry as typeof entry & { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0), 0);
+      if (expandedSize > MAX_ZIP_EXPANDED) throw new Error('Ukuran hasil ekstraksi ZIP melebihi batas 2 GB.');
+
+      const packageFiles = entries.filter(entry => /(^|\\/)package\\.json$/i.test(entry.name));
+      if (!packageFiles.length) throw new Error('package.json tidak ditemukan. Pastikan ZIP berisi root project Remotion.');
+      const rootPackage = packageFiles.sort((a, b) => a.name.split('/').length - b.name.split('/').length)[0];
+      const packageText = await rootPackage.async('text');
+      const packageJson = JSON.parse(packageText) as {
+        name?: string;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        remotion?: { entryPoint?: string };
+      };
+      const dependencies = { ...packageJson.dependencies, ...packageJson.devDependencies };
+      const remotionVersion = dependencies.remotion;
+      if (!remotionVersion) throw new Error('Dependency "remotion" tidak ditemukan di package.json.');
+
+      const rootPrefix = rootPackage.name.slice(0, rootPackage.name.lastIndexOf('/') + 1);
+      const lockfile = ['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock']
+        .find(name => entries.some(entry => entry.name === rootPrefix + name));
+      const sourceEntries = entries.filter(entry =>
+        entry.name.startsWith(rootPrefix) &&
+        /\\.(tsx?|jsx?)$/i.test(entry.name) &&
+        !/(^|\\/)(node_modules|\.next|dist|build)\\//.test(entry.name) &&
+        ((entry as typeof entry & { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? MAX_SOURCE_FILE + 1) <= MAX_SOURCE_FILE
+      );
+      const found = new Set<string>();
+      const compositionPattern = /\\bid\\s*=\\s*(?:\\{\\s*)?(['"`])([A-Za-z0-9_-]{1,120})\\1/g;
+      for (const entry of sourceEntries.slice(0, 1500)) {
+        const source = await entry.async('text');
+        let match: RegExpExecArray | null;
+        while ((match = compositionPattern.exec(source)) !== null) found.add(match[2]);
+        if (found.size >= 100) break;
+      }
+
+      const compositions = [...found].sort((a, b) => a.localeCompare(b));
+      const warnings: string[] = [];
+      if (!lockfile) warnings.push('Lockfile tidak ditemukan. Versi dependency dapat berubah saat render.');
+      if (!compositions.length) warnings.push('Composition ID tidak terdeteksi secara statis. Kamu masih bisa memasukkan ID secara manual.');
+      if (sourceEntries.length > 1500) warnings.push('Pemindaian dibatasi ke 1.500 file source pertama.');
+      const entryPoint = packageJson.remotion?.entryPoint;
+      const result: ProjectInspection = {
+        status: warnings.length ? 'warning' : 'ready',
+        projectName: packageJson.name || rootPackage.name.replace(/(^|\\/)package\\.json$/, ''),
+        remotionVersion,
+        entryPoint,
+        lockfile,
+        compositions,
+        warnings,
+      };
+      setInspection(result);
+      if (compositions.length === 1) setComposition(compositions[0]);
+      setNotice(compositions.length ? 'Project berhasil diperiksa. Pilih Composition ID yang akan dirender.' : 'Project terbaca, tetapi Composition ID perlu diisi manual.', 'success');
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'ZIP tidak dapat diperiksa.';
+      setInspection({ status: 'error', compositions: [], warnings: [], error: reason });
+      setNotice(reason, 'error');
+    }
+  }
+
   function setNotice(text: string, type: 'info' | 'error' | 'success' = 'info') {
     setMessage(text);
     setMessageType(type);
@@ -136,7 +219,7 @@ export default function Home() {
       setJobs(current => [job, ...current].slice(0, 12));
       setActiveJobId(requestId);
       setFile(null);
-      if (fileInput.current) fileInput.current.value = '';
+      if (fileInput.current) fileInput.current.value = ''; setInspection(EMPTY_INSPECTION);
       setNotice('Render masuk antrean. Status akan diperbarui otomatis.', 'success');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Terjadi kesalahan saat memulai render.', 'error');
@@ -223,15 +306,16 @@ export default function Home() {
             <input ref={fileInput} id="project-file" type="file" accept=".zip,application/zip" className="visually-hidden" onChange={event => {
               const next = event.target.files?.[0] ?? null;
               setFile(next);
+              setInspection(EMPTY_INSPECTION);
               if (next && next.size > 250 * 1024 * 1024) setNotice('Ukuran ZIP maksimal 250 MB.', 'error');
-              else if (next) setNotice('Project siap diunggah.', 'success');
+              else if (next) void inspectProject(next);
             }}/>
             <button type="button" className={`dropzone ${file ? 'has-file' : ''}`} onClick={() => fileInput.current?.click()} onDragOver={event => event.preventDefault()} onDrop={event => {
               event.preventDefault();
               const dropped = event.dataTransfer.files?.[0];
               if (!dropped) return;
               if (!dropped.name.toLowerCase().endsWith('.zip') || dropped.size > 250 * 1024 * 1024) return setNotice('Pilih ZIP yang valid dengan ukuran maksimal 250 MB.', 'error');
-              setFile(dropped); setNotice('Project siap diunggah.', 'success');
+              setFile(dropped); setInspection(EMPTY_INSPECTION); void inspectProject(dropped);
             }}>
               <span className="drop-icon">{file ? <FolderOpen size={22}/> : <CloudUpload size={23}/>}</span>
               <span className="drop-copy"><b>{file ? file.name : 'Drop your Remotion project'}</b><small>{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · Ready to upload` : 'or browse files from your device'}</small></span>
@@ -240,9 +324,22 @@ export default function Home() {
           </div>
 
           <div className="form-section">
-            <div className="field-heading"><label htmlFor="composition">COMPOSITION</label><span>REMOTION ID</span></div>
-            <input id="composition" className="text-input" value={composition} onChange={event => setComposition(event.target.value)} placeholder="e.g. RWorksPortfolio" autoComplete="off"/>
-            <p className="field-hint"><CircleHelp size={13}/> Enter the ID defined in your project’s Remotion composition.</p>
+            <div className="field-heading"><label htmlFor="composition">COMPOSITION</label><span>{inspection.status === 'scanning' ? 'SCANNING PROJECT' : inspection.compositions.length ? inspection.compositions.length + ' FOUND' : 'REMOTION ID'}</span></div>
+            {inspection.status === 'scanning' ? <div className="inspector-card scanning"><LoaderCircle size={16} className="spin"/><div><b>Inspecting project archive</b><small>Reading package metadata and source files…</small></div></div> :
+              inspection.compositions.length > 0 ? <select id="composition" className="text-input" value={composition} onChange={event => setComposition(event.target.value)}>
+                <option value="">Select a composition</option>
+                {inspection.compositions.map(id => <option key={id} value={id}>{id}</option>)}
+              </select> :
+              <input id="composition" className="text-input" value={composition} onChange={event => setComposition(event.target.value)} placeholder="e.g. RWorksPortfolio" autoComplete="off"/>}
+            {inspection.status === 'ready' || inspection.status === 'warning' ? <div className="inspector-card">
+              <span className="inspector-status"><CheckCircle2 size={15}/></span><div className="inspector-content">
+                <b>{inspection.projectName || 'Remotion project detected'}</b>
+                <small>Remotion {inspection.remotionVersion}{inspection.lockfile ? ' · ' + inspection.lockfile : ' · No lockfile'}</small>
+                {inspection.entryPoint && <small>Entry: {inspection.entryPoint}</small>}
+                {inspection.warnings.map(warning => <small className="inspector-warning" key={warning}>{warning}</small>)}
+              </div>
+            </div> : inspection.status === 'error' ? <p className="field-hint inspector-error"><AlertCircle size={13}/>{inspection.error}</p> :
+              <p className="field-hint"><CircleHelp size={13}/> Choose a ZIP to scan compositions automatically. You can still enter an ID manually.</p>}
           </div>
 
           <div className="form-section">
@@ -272,7 +369,7 @@ export default function Home() {
             <div className="key-input-wrap"><KeyRound size={15}/><input id="access-key" type={showKey ? 'text' : 'password'} value={accessKey} onChange={event => setAccessKey(event.target.value)} placeholder="Enter your workspace key" autoComplete="off"/><button type="button" onClick={() => setShowKey(value => !value)}>{showKey ? 'Hide' : 'Show'}</button></div>
           </div>
 
-          <button type="button" className="render-button" onClick={() => void startRender()} disabled={busy || !file || !composition.trim() || !accessKey.trim()}>
+          <button type="button" className="render-button" onClick={() => void startRender()} disabled={busy || !file || inspection.status === 'scanning' || !composition.trim() || !accessKey.trim()}>
             {busy ? <><LoaderCircle size={17} className="spin"/>{stage === 'uploading' ? 'Uploading project…' : 'Starting cloud render…'}</> : <><Play size={16} fill="currentColor"/> Render project <ArrowUpRight size={16}/></>}
           </button>
           <p className="secure-note"><LockKeyhole size={12}/> Source uploads use private storage. Your access key is not saved to render history.</p>
