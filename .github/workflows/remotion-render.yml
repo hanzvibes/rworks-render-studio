@@ -1,0 +1,78 @@
+name: Remotion Cloud Render
+run-name: Render ${{ inputs.composition_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_zip_url:
+        description: Public URL to the Remotion project ZIP
+        required: true
+        type: string
+      composition_id:
+        description: Remotion composition ID
+        required: true
+        type: string
+      codec:
+        description: Output codec
+        required: true
+        type: choice
+        options: [h264, h265, vp8]
+        default: h264
+      crf:
+        description: Quality CRF
+        required: true
+        type: string
+        default: '18'
+      output_name:
+        description: Output filename
+        required: true
+        type: string
+        default: render.mp4
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: remotion-render-${{ github.run_id }}
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download source archive
+        env:
+          SOURCE_ZIP_URL: ${{ inputs.source_zip_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          curl --fail --location --silent --show-error "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
+          unzip -q /tmp/remotion-source.zip -d source
+          ROOT="$(find source -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
+          if [ -z "$ROOT" ]; then echo 'No package.json found in uploaded ZIP'; exit 1; fi
+          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: |
+          cd "$PROJECT_DIR"
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - name: Ensure Remotion browser
+        run: |
+          cd "$PROJECT_DIR"
+          npx remotion browser ensure
+      - name: Render composition
+        env:
+          COMPOSITION_ID: ${{ inputs.composition_id }}
+          CODEC: ${{ inputs.codec }}
+          CRF: ${{ inputs.crf }}
+          OUTPUT_NAME: ${{ inputs.output_name }}
+        run: |
+          cd "$PROJECT_DIR"
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" --codec "$CODEC" --crf "$CRF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remotion-render
+          path: out/*
+          if-no-files-found: error
+          retention-days: 7
