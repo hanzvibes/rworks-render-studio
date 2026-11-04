@@ -1,33 +1,35 @@
-# Deployment
+# Render Studio — operational notes
 
-## 1. Import to Vercel
-1. Import `hanzvibes/rworks-render-studio` into Vercel.
-2. Framework: Next.js; root directory: repository root.
-3. Deploy to Preview first. Do not promote to Production until upload and render dispatch have been tested.
+## Render lifecycle
 
-## 2. Connect private Blob storage
-A private Blob store named `rworks-render-source` has been created in Singapore (`sin1`). In Vercel Storage, connect it to the Render Studio project. Vercel will add `BLOB_READ_WRITE_TOKEN` to the project environment.
+1. The browser uploads a ZIP to private Vercel Blob storage.
+2. The render API validates the workspace key and dispatches a GitHub Actions workflow.
+3. GitHub Actions downloads the archive using the Blob token, validates ZIP paths, symlinks, integrity, file count and expanded size, then checks for a Remotion dependency.
+4. Dependencies are installed with the lockfile when present, the Remotion browser is prepared, and the requested composition is rendered.
+5. The output is uploaded as a GitHub Actions artifact for seven days.
 
-## 3. Configure server environment variables
-Add these to the Vercel Preview environment:
-- `RENDER_STUDIO_API_KEY`: create a long random access key; enter the same value in the dashboard before rendering.
-- `GITHUB_TOKEN`: GitHub fine-grained token for this repository with Actions: Read and write, Contents: Read.
-- `GITHUB_OWNER=hanzvibes`
-- `GITHUB_REPO=rworks-render-studio`
-- `GITHUB_WORKFLOW_ID=remotion-render.yml`
-- `BLOB_READ_WRITE_TOKEN`: supplied by the connected private Blob store.
+## Queue and resource limits
 
-Also add `BLOB_READ_WRITE_TOKEN` as a GitHub Actions repository secret with the same value. This allows the runner to download private source ZIPs. Never expose or commit any secret.
+- Render workflows are serialized per repository; later jobs wait rather than competing for runners.
+- Each job has a 90-minute timeout.
+- Source ZIP upload is limited to 250 MB.
+- ZIP extraction is limited to 10,000 entries and 2 GB expanded data.
+- Artifacts expire after seven days.
 
-Redeploy Preview after changing Vercel environment variables.
+## Preflight behavior
 
-## 4. Render flow
-1. Browser uploads ZIP directly to private Vercel Blob using a short-lived client upload token.
-2. The server validates the uploaded Blob URL and dispatches `.github/workflows/remotion-render.yml`.
-3. GitHub Actions downloads the ZIP, installs dependencies, and runs Remotion.
-4. The MP4 is stored as a GitHub Actions artifact for 7 days.
+The workflow rejects invalid ZIP archives, unsafe paths, symlinks, missing package.json, and projects without the remotion dependency. It warns when no lockfile or conventional entry point is found. A static source scan looks for the requested literal Composition ID, but this is advisory: dynamic IDs and imported constants cannot be reliably resolved with a text scan. Remotion's own CLI remains the authoritative composition check.
 
-## Notes
-- Upload limit: 250 MB.
-- The render workflow requires a GitHub token with Actions: write.
-- Use Preview first. Production deployment is intentionally not part of this setup.
+## Current product limitations
+
+- Composition discovery is advisory, not a full interactive ZIP inspector.
+- Progress reflects completed GitHub Actions steps, not rendered frames.
+- Render history remains local to the browser.
+- The download is a GitHub Actions artifact ZIP containing the rendered media.
+- Video preview, persistent server-side history, batch rendering, and multi-user accounts are not implemented yet.
+
+## Security notes
+
+- Keep GITHUB_TOKEN, RENDER_STUDIO_API_KEY, and BLOB_READ_WRITE_TOKEN in encrypted environment/secret storage. Never expose them to client bundles or logs.
+- The Blob token is only injected into the archive download step; it is not passed to project dependency installation or render commands.
+- Uploaded projects execute dependency lifecycle scripts and Remotion code on an ephemeral GitHub-hosted runner. Treat uploaded archives as untrusted and only render projects you control. This MVP is not a hardened multi-tenant sandbox.

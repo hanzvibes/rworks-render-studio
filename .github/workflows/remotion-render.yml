@@ -35,22 +35,27 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: remotion-render-${{ github.run_id }}
+  group: rworks-remotion-render-queue
   cancel-in-progress: false
 jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - name: Download source archive
+      - name: Download and validate source archive
         env:
           SOURCE_ZIP_URL: ${{ inputs.source_zip_url }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          COMPOSITION_ID: ${{ inputs.composition_id }}
         run: |
           set -euo pipefail
           mkdir -p source out
           curl --fail --location --silent --show-error -H "Authorization: Bearer $BLOB_READ_WRITE_TOKEN" "$SOURCE_ZIP_URL" -o /tmp/remotion-source.zip
           python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
           import stat
           import zipfile
 
@@ -60,26 +65,63 @@ jobs:
           with zipfile.ZipFile(archive) as bundle:
               entries = bundle.infolist()
               if len(entries) > max_files:
-                  raise SystemExit("ZIP contains too many files (limit: 10,000).")
+                  raise SystemExit("Preflight failed: ZIP contains more than 10,000 files.")
               total_size = 0
               for entry in entries:
                   name = entry.filename.replace("\\", "/")
                   parts = name.split("/")
                   if name.startswith("/") or any(part == ".." for part in parts):
-                      raise SystemExit("ZIP contains an unsafe file path.")
+                      raise SystemExit("Preflight failed: ZIP contains an unsafe path.")
                   if stat.S_ISLNK(entry.external_attr >> 16):
-                      raise SystemExit("ZIP symlinks are not supported.")
+                      raise SystemExit("Preflight failed: ZIP symlinks are not supported.")
                   total_size += entry.file_size
                   if total_size > max_uncompressed:
-                      raise SystemExit("ZIP expands beyond the 2 GB safety limit.")
+                      raise SystemExit("Preflight failed: ZIP expands beyond the 2 GB limit.")
               bad_file = bundle.testzip()
               if bad_file:
-                  raise SystemExit(f"ZIP integrity check failed: {bad_file}")
+                  raise SystemExit(f"Preflight failed: ZIP integrity error in {bad_file}.")
               bundle.extractall("source")
+
+          roots = [p.parent for p in pathlib.Path("source").rglob("package.json") if "node_modules" not in p.parts]
+          if not roots:
+              raise SystemExit("Preflight failed: package.json was not found. Upload the project root, including package.json.")
+          root = min(roots, key=lambda p: len(p.parts))
+          package_data = json.loads((root / "package.json").read_text())
+          dependencies = {**package_data.get("dependencies", {}), **package_data.get("devDependencies", {})}
+          if "remotion" not in dependencies:
+              raise SystemExit("Preflight failed: Remotion is missing from dependencies in package.json.")
+          if not (root / "package-lock.json").exists() and not (root / "npm-shrinkwrap.json").exists():
+              print("::warning::No npm lockfile found. Dependency versions may change between renders.")
+          entry = package_data.get("remotion", {}).get("entryPoint")
+          if entry and not (root / entry).is_file():
+              raise SystemExit(f"Preflight failed: configured Remotion entry point does not exist: {entry}")
+          if not entry and not any((root / candidate).is_file() for candidate in ("src/index.ts", "src/index.tsx", "src/index.js", "src/index.jsx", "index.ts", "index.tsx", "index.js", "index.jsx")):
+              print("::warning::Could not find a conventional Remotion entry file. Remotion CLI will validate the entry point during render.")
+          composition_id = os.environ["COMPOSITION_ID"]
+          source_files = []
+          for suffix in ("*.tsx", "*.ts", "*.jsx", "*.js"):
+              source_files.extend(root.rglob(suffix))
+          found = False
+          pattern = re.compile(r'\bid\s*=\s*["\']' + re.escape(composition_id) + r'["\']')
+          for path in source_files:
+              if any(part in {"node_modules", ".next", "dist", "build"} for part in path.parts):
+                  continue
+              try:
+                  if pattern.search(path.read_text(errors="ignore")):
+                      found = True
+                      break
+              except OSError:
+                  pass
+          if not found:
+              print(f"::warning::Composition ID '{composition_id}' was not found by static inspection. Remotion will perform authoritative validation.")
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"PROJECT_DIR={root.resolve()}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## Project preflight\n\n")
+              summary.write(f"- Project root: `{root}`\n- Remotion dependency: detected\n- Requested composition: `{composition_id}`\n")
+              summary.write("- ZIP safety and integrity: passed\n")
+              summary.write("- Static composition scan: " + ("matched\n" if found else "not conclusive; CLI validation decides\n"))
           PY
-          ROOT="$(find source -name package.json -not -path '*/node_modules/*' -print -quit | xargs -r dirname)"
-          if [ -z "$ROOT" ]; then echo 'No package.json found in uploaded ZIP'; exit 1; fi
-          echo "PROJECT_DIR=$ROOT" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -89,6 +131,8 @@ jobs:
           cd "$PROJECT_DIR"
           if [ -f package-lock.json ]; then
             echo "hash=$(sha256sum package-lock.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          elif [ -f npm-shrinkwrap.json ]; then
+            echo "hash=$(sha256sum npm-shrinkwrap.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           else
             echo "hash=$(sha256sum package.json | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
           fi
@@ -102,7 +146,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd "$PROJECT_DIR"
-          if [ -f package-lock.json ]; then npm ci --prefer-offline; else npm install --prefer-offline; fi
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci --prefer-offline; else npm install --prefer-offline; fi
       - name: Ensure Remotion browser
         run: |
           cd "$PROJECT_DIR"
@@ -114,6 +158,7 @@ jobs:
           CRF: ${{ inputs.crf }}
           OUTPUT_NAME: ${{ inputs.output_name }}
         run: |
+          set -euo pipefail
           cd "$PROJECT_DIR"
           mkdir -p "$GITHUB_WORKSPACE/out"
           RENDER_ARGS=(--codec "$CODEC" --crf "$CRF")
@@ -121,6 +166,14 @@ jobs:
             RENDER_ARGS+=(--x264-preset veryfast)
           fi
           npx remotion render "$COMPOSITION_ID" "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" "${RENDER_ARGS[@]}"
+          test -s "$GITHUB_WORKSPACE/out/$OUTPUT_NAME"
+          {
+            echo "## Render output"
+            echo "- Composition: `$COMPOSITION_ID`"
+            echo "- Codec: `$CODEC`"
+            echo "- File: `$OUTPUT_NAME`"
+            echo "- Size: $(du -h "$GITHUB_WORKSPACE/out/$OUTPUT_NAME" | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: remotion-render
